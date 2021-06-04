@@ -1,6 +1,7 @@
 
 import os
 import json
+from collections.abc import Iterable
 
 import numpy as np
 import pandas as pd
@@ -13,6 +14,24 @@ from IPython.display import HTML
 from fractions import Fraction
 from urllib.parse import urlparse
 
+def is_not_all_zero(element):
+    """Check if element is zero or only contains zeros
+    """
+    if isinstance(element, Iterable):
+        return any(sub_element > 0 for sub_element in element)
+    else:
+        return element > 0
+
+def get_sublists(l):
+    """
+    Get all sub lists of l
+    """
+    return (sub_l for sub_l in l if isinstance(sub_l, Iterable))
+
+def count_non_zero_element(l):
+    """Count all elements in l which are not zero or do not only contains zeros
+    """
+    return sum([1 for element in l if is_not_all_zero(element)])
 
 class Election:
     """
@@ -102,13 +121,15 @@ class Election:
         duels = np.zeros([self.nb_candidate, self.nb_candidate])
         # print(duels)
 
-        for b in range(self.ballot.shape[0]):
-            #     print(b)
-            for c1 in range(self.ballot.shape[1] - 1):
-                for c2 in range(c1 + 1, self.ballot.shape[1]):
-                    v1, v2 = self.ballot[b, c1], self.ballot[b, c2]
-                    if v2 > 0:
-                        duels[v1 - 1, v2 - 1] += 1
+        for row in self.ballot:
+            for c1, v1 in enumerate(row[:-1]):
+                v1 = (v1,) if not isinstance(v1, Iterable) else v1
+                for v2 in row[c1 + 1 :]:
+                    v2 = (v2,) if not isinstance(v2, Iterable) else v2
+                    for winner in v1:
+                        for loser in v2:
+                            if loser > 0:
+                                duels[winner - 1, loser - 1] += 1
 
         # print(duels.sum())
         # print(duels)
@@ -125,8 +146,10 @@ class Election:
         """
         Check nb of preferences present in ballots and duels
         """
-        n = (self.ballot > 0).sum(axis=1)
-        n_ballots = int((n * (n - 1) / 2).sum())
+        n = np.array(list(count_non_zero_element(row) for row in self.ballot))
+        coef = np.array([sum([count_non_zero_element(sub_l) for sub_l in get_sublists(row)]) for row in self.ballot])
+        coef[coef==0] = 1
+        n_ballots = int(((n * (n - 1) / 2)*coef).sum())
 
         n_duels = int(self.duels.sum())
 
