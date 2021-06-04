@@ -104,7 +104,7 @@ class Election:
         # print(idx)
         # print(order)
 
-        sorted_ranked_candidates = ranked_candidates[idx]
+        sorted_ranked_candidates = ranked_candidates[tuple(idx)]
 
         # print(sorted_ranked_candidates)
 
