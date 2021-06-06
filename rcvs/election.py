@@ -185,7 +185,7 @@ class Election:
         A_ub = self.payoffs + shift
         b_ub = np.ones(self.nb_candidate)
         c = -np.ones(self.nb_candidate)
-        res_direct = linprog(c, A_ub=A_ub, b_ub=b_ub, bounds=(0, None))
+        res_direct = linprog(c, A_ub=A_ub, b_ub=b_ub, bounds=(0, None), method='revised simplex')
         if not res_direct.success:
             raise Exception('Error: Solving Simplex Direct failed')
         sol_direct = res_direct.x / res_direct.x.sum()
@@ -193,7 +193,7 @@ class Election:
         A_ub = -(self.payoffs + shift).T
         b_ub = -np.ones(self.nb_candidate)
         c = np.ones(self.nb_candidate)
-        res_dual = linprog(c, A_ub=A_ub, b_ub=b_ub, bounds=(0, None))
+        res_dual = linprog(c, A_ub=A_ub, b_ub=b_ub, bounds=(0, None), method='revised simplex')
         if not res_dual.success:
             raise Exception('Error: Solving Simplex Dual failed')
         sol_dual = res_dual.x / res_dual.x.sum()
