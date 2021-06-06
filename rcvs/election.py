@@ -2,6 +2,7 @@
 import os
 import json
 from collections.abc import Iterable
+import itertools as it
 
 import numpy as np
 import pandas as pd
@@ -13,25 +14,6 @@ from bs4 import BeautifulSoup
 from IPython.display import HTML
 from fractions import Fraction
 from urllib.parse import urlparse
-
-def is_not_all_zero(element):
-    """Check if element is zero or only contains zeros
-    """
-    if isinstance(element, Iterable):
-        return any(sub_element > 0 for sub_element in element)
-    else:
-        return element > 0
-
-def get_sublists(l):
-    """
-    Get all sub lists of l
-    """
-    return (sub_l for sub_l in l if isinstance(sub_l, Iterable))
-
-def count_non_zero_element(l):
-    """Count all elements in l which are not zero or do not only contains zeros
-    """
-    return sum([1 for element in l if is_not_all_zero(element)])
 
 class Election:
     """
@@ -146,11 +128,8 @@ class Election:
         """
         Check nb of preferences present in ballots and duels
         """
-        n = np.array(list(count_non_zero_element(row) for row in self.ballot))
-        coef = np.array([sum([count_non_zero_element(sub_l) for sub_l in get_sublists(row)]) for row in self.ballot])
-        coef[coef==0] = 1
-        n_ballots = int(((n * (n - 1) / 2)*coef).sum())
-
+        ballot_sizes = [[len(x) if isinstance(x,Iterable) else 1 for x in ballot] for ballot in self.ballot]
+        n_ballots = np.sum(np.sum(np.prod(np.vstack(it.combinations(ballot,2)),1)) for ballot in ballot_sizes)
         n_duels = int(self.duels.sum())
 
         if n_ballots != n_duels:
