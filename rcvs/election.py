@@ -1,8 +1,9 @@
-
 import os
 import json
 from collections.abc import Iterable
 import itertools as it
+from typing import Union, Tuple, List, Dict, Any
+import string
 
 import numpy as np
 import pandas as pd
@@ -14,24 +15,58 @@ from bs4 import BeautifulSoup
 from IPython.display import HTML
 from fractions import Fraction
 from urllib.parse import urlparse
+import jinja2 as jj
+
+Ballot = List[Union[int, List[int]]]
 
 class Election:
     """
     Random election class
 
-    nb_candidate: number of candidates - int
-    nb_voter: number of voters - int
-    proba_ranked: array of probabilities that a candidate is ranked by a voter - size = nb_candidate
-    popularity: array of numbers that determine relative popularity of candidates with voters
-    - size = nb_candidate
+    Consisting of ballots an election will be run with the randomized condorcet voting system.
+    A ballot is a list of ordered candidates.
+    There is one ballot for each voter.
+    Each candidate is represented by a number common to all ballots
+    A voter can orders only a subset of candidates (beware if a candidate is not specified 
+    in a vote then no information can be infered so if only one candidate is put in a vote 
+    then it doesn’t have any impact).
+    A voter can group candidates on a same level (same rank) like (1,2,(3,4),5) -> 3 and 4 
+    are preffered to 5 and not preffered to 1 and 2 but no information is given to rank 3 
+    compared to 4.
+
+    Attributes:
+        ballot (List[Union[int, List[int]]]): Description
+        best_lottery (Dict[str, float]): Description
+        candidates (List[str]): Description
+        df_ballot (pd.DataFrame): Description
+        df_duels (pd.DataFrame): Description
+        df_payoffs (pd.DataFrame): Description
+        duels (np.ndarray): Description
+        graph_data (Dict): Description
+        graph_html (Dict): Description
+        nb_candidate (int): Description
+        nb_voter (int): Description
+        payoffs (np.ndarray): Description
+        popularity (List[float]): Description
+        proba_ranked (List[float]): Description
     """
 
-    def __init__(self, nb_candidate, candidates, proba_ranked, popularity, nb_voter):
+    def __init__(
+        self,
+        nb_candidate: int,
+        nb_voter: int,
+        candidates: Dict[str, int] = None,
+        proba_ranked: List[float] = None,
+        popularity: List[float] = None,
+    ):
         self.nb_candidate = nb_candidate
-        self.candidates = candidates
+        self.nb_voter = nb_voter
+        if candidates is None:
+            self.candidates = list(string.ascii_uppercase)[:nb_candidate]
+        else:
+            self.candidates = candidates
         self.proba_ranked = proba_ranked
         self.popularity = popularity
-        self.nb_voter = nb_voter
         self.ballot = None
         self.df_ballot = None
         self.duels = None
@@ -42,19 +77,106 @@ class Election:
         self.graph_data = None
         self.graph_html = None
 
+    @staticmethod
+    def run_election_from_ballot(ballot: Ballot, nb_candidate: int=None) -> "Election":
+        """Runs the election from ballot given
+        
+        Args:
+            ballot (Ballot): list of each vote
+            nb_candidate (int, optional): Force number of candidates
+        
+        Returns:
+            Election: the election with best lottery computed
+        """
+
+        def mixed_flatten(seq: Ballot) -> List[Any]:
+            """Flattens a mixed list of "elements" and "list of elements"
+
+            Args:
+                seq (List[Union[Any, List[Any]]]): the list to flatten
+
+            Returns:
+                List[Any]: the flatten list
+            """
+            flatten_list = []
+            for el in seq:
+                if isinstance(el, Iterable):
+                    flatten_list.extend(el)
+                else:
+                    flatten_list.append(el)
+            return flatten_list
+
+        def remove_zeros(ballot: Ballot) -> Ballot:
+            """Removes all zeros in ballot
+
+            (1,2,3,0,0,0) -> (1,2,3)
+            (1,0,2,0,3,0) -> (1,2,3)
+            (1,(2,3),(0,0)) -> (1,(2,3))
+            (1,(2,0,3),(0,4),(0,5,0),(0,0)) -> (1,(2,3),4,5)
+            
+            Args:
+                ballot (Ballot): the ballot to remove zeros from
+            
+            Returns:
+                Ballot: the processed ballot
+            """
+            result = []
+            for vote in ballot:
+                v = []
+                for level in vote:
+                    if level == 0:
+                        continue
+                    if isinstance(level, Iterable):
+                        trimed = [x for x in level if x != 0]
+                        if not trimed:
+                            continue
+                        v.append(trimed)
+                    else:
+                        v.append(level)
+                result.append(v)
+            return result
+
+        ballot = remove_zeros(ballot)
+        nb_voter = len(ballot)
+        if nb_candidate is None:
+            nb_candidate = len(set(mixed_flatten(it.chain.from_iterable(ballot))))
+        candidates = list(string.ascii_uppercase)[:nb_candidate]
+        proba_ranked = None
+        popularity = None
+
+        elect = Election(
+            nb_candidate=nb_candidate,
+            candidates=candidates,
+            proba_ranked=proba_ranked,
+            popularity=popularity,
+            nb_voter=nb_voter,
+        )
+
+        elect.ballot = ballot
+
+        elect.build_table_duels()
+        elect.check_table_duels()
+        elect.build_table_payoff()
+        elect.get_best_lottery()
+
+        return elect
+
     def overview_candidates(self):
         """
         Show candidates statistics
         """
-        df = pd.DataFrame(data=np.vstack([self.proba_ranked, self.popularity]).T,
-                          index=self.candidates,
-                          columns=['Ranked Proba', 'Popularity'])
+        df = pd.DataFrame(
+            data=np.vstack([self.proba_ranked, self.popularity]).T,
+            index=self.candidates,
+            columns=["Ranked Proba", "Popularity"],
+        )
         ax = df.plot.bar(
-            figsize=(12, 5), title='Overview of Candidates Ranked Proba and Popularity')
-        ax.set_ylabel('Value')
-        ax.set_xlabel('Candidate')
+            figsize=(12, 5), title="Overview of Candidates Ranked Proba and Popularity"
+        )
+        ax.set_ylabel("Value")
+        ax.set_xlabel("Candidate")
 
-    def run_election(self, seed=None):
+    def run_election_from_popularity(self, seed: int = None):
         """
         Run election
 
@@ -68,6 +190,10 @@ class Election:
         order of preference. The ranked candidates come first then as many 0's as there are
         unranked candidates
         """
+        if self.proba_ranked is None or self.popularity is None:
+            raise Exception(
+                "the election must have proba_ranked and popularity attributes set to run election"
+            )
         if seed is not None:
             np.random.seed(seed)
 
@@ -81,27 +207,16 @@ class Election:
         order = score_candidates.argsort(axis=1)[:, ::-1]
         idx[1] = order
 
-        # print(ranked_candidates)
-        # print(score_candidates)
-        # print(idx)
-        # print(order)
-
         sorted_ranked_candidates = ranked_candidates[tuple(idx)]
 
-        # print(sorted_ranked_candidates)
-
         self.ballot = (1 + order) * sorted_ranked_candidates
-
-        # print(ballot)
 
     def build_table_duels(self):
         """
         Build np.array of duels and corresponding pandas dataframe
         cell (row, col) is the number of preference candidate(row) > candidate(col)
         """
-
         duels = np.zeros([self.nb_candidate, self.nb_candidate])
-        # print(duels)
 
         for row in self.ballot:
             for c1, v1 in enumerate(row[:-1]):
@@ -113,27 +228,42 @@ class Election:
                             if loser > 0:
                                 duels[winner - 1, loser - 1] += 1
 
-        # print(duels.sum())
-        # print(duels)
-
         df_duels = pd.DataFrame(
-            data=duels, index=self.candidates, columns=self.candidates)
-        df_duels.index.name = 'winner'
-        df_duels.columns.name = 'loser'
+            data=duels, index=self.candidates, columns=self.candidates
+        )
+        df_duels.index.name = "winner"
+        df_duels.columns.name = "loser"
 
         self.duels = duels
         self.df_duels = df_duels
 
-    def check_table_duels(self):
+    def check_table_duels(self) -> Union[int, Tuple[int, int]]:
         """
         Check nb of preferences present in ballots and duels
         """
-        ballot_sizes = [[len(x) if isinstance(x,Iterable) else 1 for x in ballot] for ballot in self.ballot]
-        n_ballots = np.sum(np.sum(np.prod(np.vstack(it.combinations(ballot,2)),1)) for ballot in ballot_sizes)
+
+        def my_combinations(seq: List[int], n: int) -> List[List[int]]:
+            result = tuple(it.combinations(seq, n))
+            if not result:
+                result = [[0]]
+            return result
+
+        ballot_sizes = [
+            [len(x) if isinstance(x, Iterable) else 1 for x in ballot]
+            for ballot in self.ballot
+        ]
+        n_ballots = np.sum(
+            np.concatenate(
+                [
+                    np.prod(my_combinations(ballot_size, 2), 1)
+                    for ballot_size in ballot_sizes
+                ]
+            )
+        )
         n_duels = int(self.duels.sum())
 
         if n_ballots != n_duels:
-            print('Error')
+            print("Error")
             return n_ballots, n_duels
         else:
             return n_ballots
@@ -144,7 +274,6 @@ class Election:
         cell (row, col) = 1 if duels(row, col) > duels(col, row) else -1
         so this is a zero sum game payoff
         """
-
         payoffs = np.zeros_like(self.duels)
 
         for i in range(self.nb_candidate):
@@ -157,21 +286,22 @@ class Election:
                     payoffs[i, j] = -1
 
         df_payoffs = pd.DataFrame(
-            data=payoffs, index=self.candidates, columns=self.candidates)
-        df_payoffs.index.name = 'winner'
-        df_payoffs.columns.name = 'loser'
+            data=payoffs, index=self.candidates, columns=self.candidates
+        )
+        df_payoffs.index.name = "winner"
+        df_payoffs.columns.name = "loser"
 
         self.payoffs = payoffs
         self.df_payoffs = df_payoffs
 
         if np.abs(payoffs + np.eye(self.nb_candidate)).min() == 0:
-            print('#'*60)
-            print('WARNING: The payoff matrix has zero non-diagonal values.')
-            print('Meaning the graph is not complete.')
-            print('Consequently the best lottery is not necessarily unique.')
+            print("#" * 60)
+            print("WARNING: The payoff matrix has zero non-diagonal values.")
+            print("Meaning the graph is not complete.")
+            print("Consequently the best lottery is not necessarily unique.")
             print('And function "get_best_lottery" may raise an exception')
-            print('if the direct/dual solutions are not the same (safety check)')
-            print('#'*60, '\n\n')
+            print("if the direct/dual solutions are not the same (safety check)")
+            print("#" * 60, "\n\n")
 
     def get_best_lottery(self):
         """
@@ -179,41 +309,54 @@ class Election:
         Direct and dual problems (Simplex Method - cf notebook)
         Check is same result
         """
+        if (self.payoffs == 0).all():
+            self.best_lottery = dict(
+                zip(self.candidates, np.ones(self.nb_candidate) / self.nb_candidate)
+            )
+            print("#" * 60)
+            print("INFO: the payoff matrix is composed only of 0.")
+            print("The optimization would return any lottery so all")
+            print("candidate have an equal chance of winning.")
+            print("#" * 60)
+            return
 
         shift = np.abs(self.payoffs.min()) + 2
 
         A_ub = self.payoffs + shift
         b_ub = np.ones(self.nb_candidate)
         c = -np.ones(self.nb_candidate)
-        res_direct = linprog(c, A_ub=A_ub, b_ub=b_ub, bounds=(0, None), method='revised simplex')
+        res_direct = linprog(
+            c, A_ub=A_ub, b_ub=b_ub, bounds=(0, None), method="revised simplex"
+        )
         if not res_direct.success:
-            raise Exception('Error: Solving Simplex Direct failed')
+            raise Exception("Error: Solving Simplex Direct failed")
         sol_direct = res_direct.x / res_direct.x.sum()
 
         A_ub = -(self.payoffs + shift).T
         b_ub = -np.ones(self.nb_candidate)
         c = np.ones(self.nb_candidate)
-        res_dual = linprog(c, A_ub=A_ub, b_ub=b_ub, bounds=(0, None), method='revised simplex')
+        res_dual = linprog(
+            c, A_ub=A_ub, b_ub=b_ub, bounds=(0, None), method="revised simplex"
+        )
         if not res_dual.success:
-            raise Exception('Error: Solving Simplex Dual failed')
+            raise Exception("Error: Solving Simplex Dual failed")
         sol_dual = res_dual.x / res_dual.x.sum()
 
         if not np.allclose(sol_direct, sol_dual):
-            print('res_direct')
+            print("res_direct")
             print(res_direct)
-            print('res_dual')
+            print("res_dual")
             print(res_dual)
-            raise Exception('Error: Direct and Dual solutions are different')
-
+            raise Exception("Error: Direct and Dual solutions are different")
         self.best_lottery = dict(zip(self.candidates, sol_direct))
 
     @staticmethod
-    def frac(x):
+    def frac(x: float) -> str:
         """
         Convert float to fraction assuming that number is float representation of fraction
         """
         f = Fraction(x).limit_denominator().limit_denominator()
-        ratio = '{}/{}'.format(f.numerator, f.denominator)
+        ratio = "{}/{}".format(f.numerator, f.denominator)
         return ratio
 
     def build_graph_data(self):
@@ -226,9 +369,9 @@ class Election:
         nodes = []
         for c in self.candidates:
             d = {}
-            d['name'] = c
+            d["name"] = c
             p = self.best_lottery[c]
-            d['proba'] = self.frac(p) if p > 0 else None
+            d["proba"] = self.frac(p) if p > 0 else None
             nodes.append(d)
 
         is_duels = self.duels is not None
@@ -240,50 +383,61 @@ class Election:
         for i in range(self.nb_candidate):
             for j in range(i + 1, self.nb_candidate):
                 if self.payoffs[i, j] > self.payoffs[j, i]:
-                    label = '{:.2f} - {:.2f}'.format(
-                        100 * duels2[i, j], 100 * duels2[j, i]) if is_duels else None
-                    links.append({'source': i, 'target': j, 'label': label})
+                    label = (
+                        "{:.2f} - {:.2f}".format(100 * duels2[i, j], 100 * duels2[j, i])
+                        if is_duels
+                        else None
+                    )
+                    links.append({"source": i, "target": j, "label": label})
                 elif self.payoffs[i, j] < self.payoffs[j, i]:
-                    label = '{:.2f} - {:.2f}'.format(
-                        100 * duels2[j, i], 100 * duels2[i, j]) if is_duels else None
-                    links.append({'source': j, 'target': i, 'label': label})
-            win = True if (self.payoffs[i, :].sum()
-                           == self.nb_candidate - 1) else False
-            nodes[i]['C-winner'] = win
+                    label = (
+                        "{:.2f} - {:.2f}".format(100 * duels2[j, i], 100 * duels2[i, j])
+                        if is_duels
+                        else None
+                    )
+                    links.append({"source": j, "target": i, "label": label})
+            win = True if (self.payoffs[i, :].sum() == self.nb_candidate - 1) else False
+            nodes[i]["C-winner"] = win
 
-        self.graph_data = {'nodes': nodes, 'links': links}
+        self.graph_data = {"nodes": nodes, "links": links}
 
-    
-
-    def build_graph_html(self, width=960, height=500, linkDistance=200, linkColor='#121212',
-                         labelColor='#aaa', charge=-300, theta=0.1, gravity=0.05,
-                         saved=False):
+    def build_graph_html(
+        self,
+        width=960,
+        height=500,
+        linkDistance=200,
+        linkColor="#121212",
+        labelColor="#aaa",
+        charge=-300,
+        theta=0.1,
+        gravity=0.05,
+        saved=False,
+    ):
         """
         Build html based on d3.js force layout template
         inspired from http://bl.ocks.org/jhb/5955887
         """
-
-        import jinja2 as jj
-
         # get template
-        env = jj.Environment(loader=jj.FileSystemLoader(['./graph']),
-                             variable_start_string='__$',
-                             variable_end_string='$__')
-        html_template = env.get_template('graph_template.html')
+        env = jj.Environment(
+            loader=jj.FileSystemLoader(["./graph"]),
+            variable_start_string="__$",
+            variable_end_string="$__",
+        )
+        html_template = env.get_template("graph_template.html")
 
         # build data to put in template
         random_tag = str(int(np.random.random() * 10000))
         dic_data = {
-            'tag': random_tag,
-            'json_data': json.dumps(self.graph_data),
-            'width': width,
-            'height': height,
-            'linkDistance': linkDistance,
-            'linkColor': linkColor,
-            'labelColor': labelColor,
-            'Charge': charge,
-            'Theta': theta,
-            'Gravity': gravity
+            "tag": random_tag,
+            "json_data": json.dumps(self.graph_data),
+            "width": width,
+            "height": height,
+            "linkDistance": linkDistance,
+            "linkColor": linkColor,
+            "labelColor": labelColor,
+            "Charge": charge,
+            "Theta": theta,
+            "Gravity": gravity,
         }
 
         # render template
@@ -291,23 +445,23 @@ class Election:
 
         # save as standalone
         if saved:
-            if not os.path.exists('saved'):
-                os.makedirs('saved')
-            with open('saved/graph.html', 'w') as f:
+            if not os.path.exists("saved"):
+                os.makedirs("saved")
+            with open("saved/graph.html", "w") as f:
                 f.write(html_string)
 
         # extract pieces from template
         def get_lib_name(url):
-            return urlparse(url).path.split('.')[0][1:]
+            return urlparse(url).path.split(".")[0][1:]
 
-        soup = BeautifulSoup(html_string, 'html.parser')
-        js_lib_url_1 = soup.find('head').find_all('script')[0].attrs['src']
-        css = soup.find('head').find('style')
-        div = soup.find('body').find_all('div')[0]
-        js = soup.find('body').find_all('script')[0].contents[0]
+        soup = BeautifulSoup(html_string, "html.parser")
+        js_lib_url_1 = soup.find("head").find_all("script")[0].attrs["src"]
+        css = soup.find("head").find("style")
+        div = soup.find("body").find_all("div")[0]
+        js = soup.find("body").find_all("script")[0].contents[0]
         js_lib_name_1 = get_lib_name(js_lib_url_1)
         js_lib = json.dumps([js_lib_url_1])
-        js_lib_name = ', '.join([js_lib_name_1])
+        js_lib_name = ", ".join([js_lib_name_1])
 
         # build output from pieces
         html_output = """
@@ -316,7 +470,13 @@ class Election:
         <script type="text/javascript">
         require(%s, function(%s) { %s });
         </script>
-        """ % (div, css, js_lib, js_lib_name, js)
+        """ % (
+            div,
+            css,
+            js_lib,
+            js_lib_name,
+            js,
+        )
 
         self.graph_html = html_output
 
@@ -327,64 +487,76 @@ class Election:
         clear_output(wait=True)
         return HTML(self.graph_html)
 
+    # def build_graph_html2(
+    #     self,
+    #     width=960,
+    #     height=500,
+    #     linkDistance=200,
+    #     linkColor="#121212",
+    #     labelColor="#aaa",
+    #     charge=-300,
+    #     theta=0.1,
+    #     gravity=0.05,
+    #     saved=False,
+    # ):
+    #     """
+    #     Build html based on d3.js force layout template
+    #     inspired from http://bl.ocks.org/jhb/5955887
+    #     """
+    #     with open("./graph/graph_template.html", "r") as f:
+    #         html = f.read()
 
+    #     dic_data = {
+    #         "__json_data__": json.dumps(self.graph_data),
+    #         "__width__": width,
+    #         "__height__": height,
+    #         "__linkDistance__": linkDistance,
+    #         "__linkColor__": '"{}"'.format(linkColor),
+    #         "__labelColor__": "{}".format(labelColor),
+    #         "__Charge__": charge,
+    #         "__Theta__": theta,
+    #         "__Gravity__": gravity,
+    #     }
 
-# def build_graph_html2(self, width=960, height=500, linkDistance=200, linkColor='#121212',
-#                          labelColor='#aaa', charge=-300, theta=0.1, gravity=0.05,
-#                          saved=False):
-#         """
-#         Build html based on d3.js force layout template
-#         inspired from http://bl.ocks.org/jhb/5955887
-#         """
-#         with open('./graph/graph_template.html', 'r') as f:
-#             html = f.read()
+    #     for k, v in dic_data.items():
+    #         v2 = v if isinstance(v, str) else str(v)
+    #         html = html.replace(k, v2)
 
-#         dic_data = {
-#             '__json_data__': json.dumps(self.graph_data),
-#             '__width__': width,
-#             '__height__': height,
-#             '__linkDistance__': linkDistance,
-#             '__linkColor__': '"{}"'.format(linkColor),
-#             '__labelColor__': '{}'.format(labelColor),
-#             '__Charge__': charge,
-#             '__Theta__': theta,
-#             '__Gravity__': gravity,
-#         }
+    #     if saved:
+    #         if not os.path.exists("saved"):
+    #             os.makedirs("saved")
+    #         with open("saved/graph.html", "w") as f:
+    #             f.write(html)
 
-#         for k, v in dic_data.items():
-#             v2 = v if isinstance(v, str) else str(v)
-#             html = html.replace(k, v2)
+    #     soup = BeautifulSoup(html, "html.parser")
 
-#         if saved:
-#             if not os.path.exists('saved'):
-#                 os.makedirs('saved')
-#             with open('saved/graph.html', 'w') as f:
-#                 f.write(html)
+    #     js = soup.find("body").find("script").contents[0]
+    #     css = soup.find("head").find("style").contents[0]
 
-#         soup = BeautifulSoup(html, 'html.parser')
+    #     JS_LIBS = json.dumps(["http://d3js.org/d3.v3.min.js"])
 
-#         js = soup.find('body').find('script').contents[0]
-#         css = soup.find('head').find('style').contents[0]
+    #     html_output = """
+    #         <div id="graphdiv">
+    #         </div>
 
-#         JS_LIBS = json.dumps(['http://d3js.org/d3.v3.min.js'])
+    #         <style type="text/css">
+    #             %s
+    #         </style>
 
-#         html_output = """
-#         <div id="graphdiv">
-#         </div>
+    #         <script type="text/javascript">
+    #         require(%s, function() {
+    #             %s
+    #         });
+    #         </script>
 
-#         <style type="text/css">
-#             %s
-#         </style>
+    #         """ % (
+    #         css,
+    #         JS_LIBS,
+    #         js,
+    #     )
 
-#         <script type="text/javascript">
-#         require(%s, function() {
-#             %s
-#         });
-#         </script>
+    #     html_output = html_output.replace(
+    #         "graphdiv", "graphdiv" + str(int(np.random.random() * 10000))
+    #     )
 
-#         """ % (css, JS_LIBS, js)
-
-#         html_output = html_output.replace(
-#             'graphdiv', 'graphdiv' + str(int(np.random.random() * 10000)))
-
-#         self.graph_html = html_output
+    #     self.graph_html = html_output
