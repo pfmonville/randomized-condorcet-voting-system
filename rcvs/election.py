@@ -19,6 +19,7 @@ import jinja2 as jj
 
 Ballot = List[Union[int, List[int]]]
 
+
 class Election:
     """
     Random election class
@@ -27,11 +28,11 @@ class Election:
     A ballot is a list of ordered candidates.
     There is one ballot for each voter.
     Each candidate is represented by a number common to all ballots
-    A voter can orders only a subset of candidates (beware if a candidate is not specified 
-    in a vote then no information can be infered so if only one candidate is put in a vote 
+    A voter can orders only a subset of candidates (beware if a candidate is not specified
+    in a vote then no information can be infered so if only one candidate is put in a vote
     then it doesn’t have any impact).
-    A voter can group candidates on a same level (same rank) like (1,2,(3,4),5) -> 3 and 4 
-    are preffered to 5 and not preffered to 1 and 2 but no information is given to rank 3 
+    A voter can group candidates on a same level (same rank) like (1,2,(3,4),5) -> 3 and 4
+    are preffered to 5 and not preffered to 1 and 2 but no information is given to rank 3
     compared to 4.
 
     Attributes:
@@ -78,13 +79,15 @@ class Election:
         self.graph_html = None
 
     @staticmethod
-    def run_election_from_ballot(ballot: Ballot, nb_candidate: int=None) -> "Election":
+    def run_election_from_ballot(
+        ballot: Ballot, nb_candidate: int = None
+    ) -> "Election":
         """Runs the election from ballot given
-        
+
         Args:
             ballot (Ballot): list of each vote
             nb_candidate (int, optional): Force number of candidates
-        
+
         Returns:
             Election: the election with best lottery computed
         """
@@ -113,10 +116,10 @@ class Election:
             (1,0,2,0,3,0) -> (1,2,3)
             (1,(2,3),(0,0)) -> (1,(2,3))
             (1,(2,0,3),(0,4),(0,5,0),(0,0)) -> (1,(2,3),4,5)
-            
+
             Args:
                 ballot (Ballot): the ballot to remove zeros from
-            
+
             Returns:
                 Ballot: the processed ballot
             """
@@ -136,6 +139,8 @@ class Election:
                 result.append(v)
             return result
 
+        if len(ballot) == 0:
+            raise AttributeError(f"The ballot is empty : {ballot}")
         ballot = remove_zeros(ballot)
         nb_voter = len(ballot)
         if nb_candidate is None:
@@ -249,7 +254,7 @@ class Election:
             return result
 
         ballot_sizes = [
-            [len(x) if isinstance(x, Iterable) else 1 for x in ballot]
+            [len(x) if isinstance(x, Iterable) else 1 for x in ballot if x != 0]
             for ballot in self.ballot
         ]
         n_ballots = np.sum(
@@ -299,56 +304,83 @@ class Election:
             print("WARNING: The payoff matrix has zero non-diagonal values.")
             print("Meaning the graph is not complete.")
             print("Consequently the best lottery is not necessarily unique.")
-            print('And function "get_best_lottery" may raise an exception')
-            print("if the direct/dual solutions are not the same (safety check)")
+            print("The solver will return the fairest lottery between")
+            print("those which share the same minimax objective value")
             print("#" * 60, "\n\n")
 
     def get_best_lottery(self):
         """
         Determine best solution to problem
-        Direct and dual problems (Simplex Method - cf notebook)
-        Check is same result
+        Gets the lexicographic solution for bi-objective
+        1: minimize maximum gain from opponent
+        2: minimizing the maximum probability to ensure fairness
         """
-        if (self.payoffs == 0).all():
-            self.best_lottery = dict(
-                zip(self.candidates, np.ones(self.nb_candidate) / self.nb_candidate)
-            )
-            print("#" * 60)
-            print("INFO: the payoff matrix is composed only of 0.")
-            print("The optimization would return any lottery so all")
-            print("candidate have an equal chance of winning.")
-            print("#" * 60)
-            return
 
-        shift = np.abs(self.payoffs.min()) + 2
+        # ===============
+        # Solver 1
+        # ===============
 
-        A_ub = self.payoffs + shift
-        b_ub = np.ones(self.nb_candidate)
-        c = -np.ones(self.nb_candidate)
+        # define the maximum value between each opponent strategy
+        # v ⩾ ∑_j(A[i,j]*p[j]) ∀i
+        A_ub = np.c_[
+            -np.ones((self.nb_candidate)),
+            self.payoffs,
+        ]
+        b_ub = np.zeros((len(A_ub)))
+
+        # défine that the sum of all probabilities for plays is 1
+        # ∑_j(p[j]) == 1
+        A_eq = np.array([[0, *[1 for _ in range(self.nb_candidate)]]])
+        b_eq = 1
+
+        # define objective as minimizing the maximum gain from opponent
+        c = np.array([1, *[0 for _ in range(self.nb_candidate)]])
         res_direct = linprog(
-            c, A_ub=A_ub, b_ub=b_ub, bounds=(0, None), method="revised simplex"
+            c, A_ub=A_ub, b_ub=b_ub, A_eq=A_eq, b_eq=b_eq, method="revised simplex"
         )
         if not res_direct.success:
             raise Exception("Error: Solving Simplex Direct failed")
-        sol_direct = res_direct.x / res_direct.x.sum()
 
-        A_ub = -(self.payoffs + shift).T
-        b_ub = -np.ones(self.nb_candidate)
-        c = np.ones(self.nb_candidate)
-        res_dual = linprog(
-            c, A_ub=A_ub, b_ub=b_ub, bounds=(0, None), method="revised simplex"
+        # get solution from solver 1
+        v = res_direct.fun
+
+        # ===============
+        # Solver 2
+        # ===============
+
+        # define the maximum value between each opponent strategy
+        # v ⩾ ∑_j(A[i,j]*p[j]) ∀i
+        cons1 = np.c_[
+            np.zeros((self.nb_candidate)),
+            self.payoffs,
+        ]
+        # défine z as the maximum between all probabilities of each play
+        # z ⩾ p[j] ∀j
+        cons2 = np.c_[
+            -np.ones((self.nb_candidate)),
+            np.eye((self.nb_candidate)),
+        ]
+        A_ub2 = np.r_[cons1, cons2]
+        b_ub2 = np.r_[np.zeros((len(cons1))), np.zeros((len(cons2))) + v]
+
+        # défine that the sum of all probabilities for plays 1
+        # ∑_j(p[j]) == 1
+        A_eq2 = np.array([[0, *[1 for _ in range(self.nb_candidate)]]])
+        b_eq2 = 1
+
+        # define objective as minimizing the maximum probability of a play (which cause fairness)
+        c2 = np.array([1, *[0 for _ in range(self.nb_candidate)]])
+        res_direct2 = linprog(
+            c2, A_ub=A_ub2, b_ub=b_ub2, A_eq=A_eq2, b_eq=b_eq2, method="revised simplex"
         )
-        if not res_dual.success:
-            raise Exception("Error: Solving Simplex Dual failed")
-        sol_dual = res_dual.x / res_dual.x.sum()
+        if not res_direct2.success:
+            raise Exception("Error: Solving Simplex Direct failed")
 
-        if not np.allclose(sol_direct, sol_dual):
-            print("res_direct")
-            print(res_direct)
-            print("res_dual")
-            print(res_dual)
-            raise Exception("Error: Direct and Dual solutions are different")
-        self.best_lottery = dict(zip(self.candidates, sol_direct))
+        # retrieve probabilities values (p) from solution
+        solution = res_direct2.x[1:]
+
+        # Set best lottery
+        self.best_lottery = dict(zip(self.candidates, solution))
 
     @staticmethod
     def frac(x: float) -> str:
