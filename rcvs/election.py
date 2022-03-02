@@ -17,7 +17,12 @@ from fractions import Fraction
 from urllib.parse import urlparse
 import jinja2 as jj
 
-Ballot = List[Union[int, List[int]]]
+Ballot = List[
+    Union[
+        Union[int, List[int]],
+        Union[str, List[str]],
+    ],
+]
 
 
 class Election:
@@ -103,7 +108,7 @@ class Election:
             """
             flatten_list = []
             for el in seq:
-                if isinstance(el, Iterable):
+                if isinstance(el, Iterable) and not isinstance(el, str):
                     flatten_list.extend(el)
                 else:
                     flatten_list.append(el)
@@ -141,11 +146,29 @@ class Election:
 
         if len(ballot) == 0:
             raise AttributeError(f"The ballot is empty : {ballot}")
-        ballot = remove_zeros(ballot)
+        flat_ballot = mixed_flatten(it.chain.from_iterable(ballot))
+        if len(set(type(c) for c in flat_ballot)) >= 2:
+            raise AttributeError(
+                "Ballot cannot be a mixed of types, only int or only str"
+            )
+        if all(isinstance(c, str) for c in flat_ballot):
+            candidates = list(set(flat_ballot))
+            nb_candidate = len(candidates)
+            ballot = [
+                [
+                    candidates.index(c) + 1
+                    if isinstance(c, str)
+                    else [candidates.index(d) + 1 for d in c]
+                    for c in b
+                ]
+                for b in ballot
+            ]
+        else:
+            ballot = remove_zeros(ballot)
+            if nb_candidate is None:
+                nb_candidate = len(set(mixed_flatten(it.chain.from_iterable(ballot))))
+            candidates = list(string.ascii_uppercase)[:nb_candidate]
         nb_voter = len(ballot)
-        if nb_candidate is None:
-            nb_candidate = len(set(mixed_flatten(it.chain.from_iterable(ballot))))
-        candidates = list(string.ascii_uppercase)[:nb_candidate]
         proba_ranked = None
         popularity = None
 
@@ -363,7 +386,7 @@ class Election:
         A_ub2 = np.r_[cons1, cons2]
         b_ub2 = np.r_[np.zeros((len(cons1))), np.zeros((len(cons2))) + v]
 
-        # défine that the sum of all probabilities for plays 1
+        # défine that the sum of all probabilities for plays is 1
         # ∑_j(p[j]) == 1
         A_eq2 = np.array([[0, *[1 for _ in range(self.nb_candidate)]]])
         b_eq2 = 1

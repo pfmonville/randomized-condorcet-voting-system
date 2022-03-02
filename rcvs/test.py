@@ -275,3 +275,39 @@ def test_ballot20():
     ballot = ()
     with pytest.raises(AttributeError):
         elect = Election.run_election_from_ballot(ballot)
+
+
+def test_ballot21():
+    ballot = (("A", "B"), ("C", "D"))
+    elect = Election.run_election_from_ballot(ballot)
+    assert {k: round(v, 12) for k, v in elect.best_lottery.items()} == {
+        "A": round(1 / 2, 12),
+        "B": round(0, 12),
+        "C": round(1 / 2, 12),
+        "D": round(0, 12),
+    }
+
+
+def test_ballot22():
+    ballot = (("A", "B"), (3, 4))
+    with pytest.raises(AttributeError):
+        elect = Election.run_election_from_ballot(ballot)
+    ballot = (("A", "B"), ("C", 4))
+    with pytest.raises(AttributeError):
+        elect = Election.run_election_from_ballot(ballot)
+
+
+def test_ballot23():
+    ballot = (
+        ("Luc", "Han", "Chewie", "Yoda", "Ben"),
+        ("Ben", ("Yoda", "Chewie"), "Han", "Luc"),
+        (("Yoda", "Ben"), "Luc", "Han", "Chewie"),
+    )
+    elect = Election.run_election_from_ballot(ballot)
+    assert {k: round(v, 12) for k, v in elect.best_lottery.items()} == {
+        "Luc": round(0, 12),
+        "Han": round(0, 12),
+        "Chewie": round(0, 12),
+        "Yoda": round(1 / 2, 12),
+        "Ben": round(1 / 2, 12),
+    }
