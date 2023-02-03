@@ -359,7 +359,7 @@ class Election:
         # define objective as minimizing the maximum gain from opponent
         c = np.array([1, *[0 for _ in range(self.nb_candidate)]])
         res_direct = linprog(
-            c, A_ub=A_ub, b_ub=b_ub, A_eq=A_eq, b_eq=b_eq, method="revised simplex"
+            c, A_ub=A_ub, b_ub=b_ub, A_eq=A_eq, b_eq=b_eq, method="highs"
         )
         if not res_direct.success:
             raise Exception("Error: Solving Simplex Direct failed")
@@ -394,7 +394,7 @@ class Election:
         # define objective as minimizing the maximum probability of a play (which cause fairness)
         c2 = np.array([1, *[0 for _ in range(self.nb_candidate)]])
         res_direct2 = linprog(
-            c2, A_ub=A_ub2, b_ub=b_ub2, A_eq=A_eq2, b_eq=b_eq2, method="revised simplex"
+            c2, A_ub=A_ub2, b_ub=b_ub2, A_eq=A_eq2, b_eq=b_eq2, method="highs"
         )
         if not res_direct2.success:
             raise Exception("Error: Solving Simplex Direct failed")
