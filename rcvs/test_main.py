@@ -1,7 +1,7 @@
 import string
 import numpy as np
 
-from election import Election
+from .election import Election
 import pytest
 
 
