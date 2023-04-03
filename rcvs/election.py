@@ -4,6 +4,7 @@ from collections.abc import Iterable
 import itertools as it
 from typing import Union, Tuple, List, Dict, Any
 import string
+from collections import Counter
 
 import numpy as np
 import pandas as pd
@@ -147,6 +148,8 @@ class Election:
         if len(ballot) == 0:
             raise AttributeError(f"The ballot is empty : {ballot}")
         flat_ballot = mixed_flatten(it.chain.from_iterable(ballot))
+        if max(max(Counter(mixed_flatten(x)).values()) for x in ballot) > 1:
+            raise AttributeError("Ballot cannot contains same candidate multiple times")
         if len(set(type(c) for c in flat_ballot)) >= 2:
             raise AttributeError(
                 "Ballot cannot be a mixed of types, only int or only str"
