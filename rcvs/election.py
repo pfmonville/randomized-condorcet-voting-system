@@ -1,12 +1,13 @@
 import os
 import json
-from collections.abc import Iterable
+from collections.abc import Iterable, Sequence
 import itertools as it
-from typing import Union, Tuple, List, Dict, Any
+from typing import Any
 import string
 from collections import Counter
 
 import numpy as np
+from numpy.typing import NDArray
 import pandas as pd
 
 from IPython.display import display, clear_output
@@ -18,12 +19,8 @@ from fractions import Fraction
 from urllib.parse import urlparse
 import jinja2 as jj
 
-Ballot = List[
-    Union[
-        Union[int, List[int]],
-        Union[str, List[str]],
-    ],
-]
+Vote = Sequence[int | Sequence[int]] | Sequence[str | Sequence[str]]
+Ballot = Sequence[Vote] | NDArray
 
 
 class Election:
@@ -40,31 +37,15 @@ class Election:
     A voter can group candidates on a same level (same rank) like (1,2,(3,4),5) -> 3 and 4
     are preffered to 5 and not preffered to 1 and 2 but no information is given to rank 3
     compared to 4.
-
-    Attributes:
-        ballot (List[Union[int, List[int]]]): Description
-        best_lottery (Dict[str, float]): Description
-        candidates (List[str]): Description
-        df_ballot (pd.DataFrame): Description
-        df_duels (pd.DataFrame): Description
-        df_payoffs (pd.DataFrame): Description
-        duels (np.ndarray): Description
-        graph_data (Dict): Description
-        graph_html (Dict): Description
-        nb_candidate (int): Description
-        nb_voter (int): Description
-        payoffs (np.ndarray): Description
-        popularity (List[float]): Description
-        proba_ranked (List[float]): Description
     """
 
     def __init__(
         self,
         nb_candidate: int,
         nb_voter: int,
-        candidates: Dict[str, int] = None,
-        proba_ranked: List[float] = None,
-        popularity: List[float] = None,
+        candidates: list[str] | None = None,
+        proba_ranked: list[float] | None = None,
+        popularity: list[float] | None = None,
     ):
         self.nb_candidate = nb_candidate
         self.nb_voter = nb_voter
@@ -86,26 +67,26 @@ class Election:
 
     @staticmethod
     def run_election_from_ballot(
-        ballot: Ballot, nb_candidate: int = None
+        ballot: Ballot, nb_candidate: int | None = None
     ) -> "Election":
         """Runs the election from ballot given
 
         Args:
             ballot (Ballot): list of each vote
-            nb_candidate (int, optional): Force number of candidates
+            nb_candidate (int | None, optional): Force number of candidates
 
-        Returns:
+        No Longer Returned:
             Election: the election with best lottery computed
         """
 
-        def mixed_flatten(seq: Ballot) -> List[Any]:
+        def mixed_flatten(seq: Vote) -> list[Any]:
             """Flattens a mixed list of "elements" and "list of elements"
 
             Args:
-                seq (List[Union[Any, List[Any]]]): the list to flatten
+                seq (Vote): the list to flatten
 
             Returns:
-                List[Any]: the flatten list
+                list[Any]: the flatten list
             """
             flatten_list = []
             for el in seq:
@@ -124,10 +105,10 @@ class Election:
             (1,(2,0,3),(0,4),(0,5,0),(0,0)) -> (1,(2,3),4,5)
 
             Args:
-                ballot (Ballot): the ballot to remove zeros from
+                ballot (Iterable[Ballot]): the ballot to remove zeros from
 
             Returns:
-                Ballot: the processed ballot
+                Iterable[Ballot]: the processed ballot
             """
             result = []
             for vote in ballot:
@@ -196,6 +177,11 @@ class Election:
         """
         Show candidates statistics
         """
+        if self.proba_ranked is None:
+            raise AttributeError("proba_ranked is None")
+        if self.popularity is None:
+            raise AttributeError("popularity is None")
+
         df = pd.DataFrame(
             data=np.vstack([self.proba_ranked, self.popularity]).T,
             index=self.candidates,
@@ -207,19 +193,25 @@ class Election:
         ax.set_ylabel("Value")
         ax.set_xlabel("Candidate")
 
-    def run_election_from_popularity(self, seed: int = None):
+    def run_election_from_popularity(self, seed: int | None = None):
         """
         Run election
 
         For a voter:
-        the propability of a candidate being ranked is proba_ranked
-        the score of a candidate is a random number (between 0 and 1) times its popularity
+            the propability of a candidate being ranked is proba_ranked
+            the score of a candidate is a random number (between 0 and 1) times its popularity
 
-        The resulting ballot is a 2d np.array of nb_voter x nb_candidate
-        Each line is the ballot of a voter
-        It contains the candidates identified by index (from 1 to nb_candidate) and decreasing
-        order of preference. The ranked candidates come first then as many 0's as there are
-        unranked candidates
+            The resulting ballot is a 2d np.array of nb_voter x nb_candidate
+            Each line is the ballot of a voter
+            It contains the candidates identified by index (from 1 to nb_candidate) and decreasing
+            order of preference. The ranked candidates come first then as many 0's as there are
+            unranked candidates
+
+        Args:
+            seed (int | None, optional): Description
+
+        Raises:
+            Exception: Description
         """
         if self.proba_ranked is None or self.popularity is None:
             raise Exception(
@@ -246,7 +238,13 @@ class Election:
         """
         Build np.array of duels and corresponding pandas dataframe
         cell (row, col) is the number of preference candidate(row) > candidate(col)
+
+        Raises:
+            AttributeError: Description
         """
+        if self.ballot is None:
+            raise AttributeError("ballot is None")
+
         duels = np.zeros([self.nb_candidate, self.nb_candidate])
 
         for row in self.ballot:
@@ -268,19 +266,40 @@ class Election:
         self.duels = duels
         self.df_duels = df_duels
 
-    def check_table_duels(self) -> Union[int, Tuple[int, int]]:
+    def check_table_duels(self) -> int | tuple[int, int]:
         """
         Check nb of preferences present in ballots and duels
+
+        Returns:
+            int | tuple[int, int]
+
+        Raises:
+            AttributeError: Description
         """
 
-        def my_combinations(seq: List[int], n: int) -> List[List[int]]:
+        def my_combinations(seq: list[int], n: int) -> tuple[tuple[int]]:
+            """Summary
+
+            Args:
+                seq (list[int]): Description
+                n (int): Description
+
+            Returns:
+                list[list[int]]: Description
+            """
             result = tuple(it.combinations(seq, n))
             if not result:
-                result = [[0]]
+                result = ((0,),)
             return result
 
+        if self.ballot is None:
+            raise AttributeError("ballot is None")
+
+        if self.duels is None:
+            raise AttributeError("duels is None")
+
         ballot_sizes = [
-            [len(x) if isinstance(x, Iterable) else 1 for x in ballot if x != 0]
+            [len(x) if isinstance(x, Sequence) else 1 for x in ballot if x != 0]
             for ballot in self.ballot
         ]
         n_ballots = np.sum(
@@ -304,7 +323,13 @@ class Election:
         Build np.array of payoffs and corresponding pandas dataframe
         cell (row, col) = 1 if duels(row, col) > duels(col, row) else -1
         so this is a zero sum game payoff
+
+        Raises:
+            AttributeError: Description
         """
+        if self.duels is None:
+            raise AttributeError("duels is None")
+
         payoffs = np.zeros_like(self.duels)
 
         for i in range(self.nb_candidate):
@@ -340,6 +365,12 @@ class Election:
         Gets the lexicographic solution for bi-objective
         1: minimize maximum gain from opponent
         2: minimizing the maximum probability to ensure fairness
+
+        Raises:
+            RuntimeError: Description
+
+        No Longer Raises:
+            Exception: Description
         """
 
         # ===============
@@ -365,7 +396,7 @@ class Election:
             c, A_ub=A_ub, b_ub=b_ub, A_eq=A_eq, b_eq=b_eq, method="highs"
         )
         if not res_direct.success:
-            raise Exception("Error: Solving Simplex Direct failed")
+            raise RuntimeError("Error: Solving Simplex Direct failed")
 
         # get solution from solver 1
         v = res_direct.fun
@@ -400,7 +431,7 @@ class Election:
             c2, A_ub=A_ub2, b_ub=b_ub2, A_eq=A_eq2, b_eq=b_eq2, method="highs"
         )
         if not res_direct2.success:
-            raise Exception("Error: Solving Simplex Direct failed")
+            raise RuntimeError("Error: Solving Simplex Direct failed")
 
         # retrieve probabilities values (p) from solution
         solution = res_direct2.x[1:]
@@ -412,6 +443,12 @@ class Election:
     def frac(x: float) -> str:
         """
         Convert float to fraction assuming that number is float representation of fraction
+
+        Args:
+            x (float): Description
+
+        Returns:
+            str: Description
         """
         f = Fraction(x).limit_denominator().limit_denominator()
         ratio = "{}/{}".format(f.numerator, f.denominator)
@@ -423,7 +460,15 @@ class Election:
         'nodes' : list of {'name': candidate name}
         'links' : list of {'source': candidate no, 'target': candidate no,
                            'label': fraction candidate source - fraction candidate target}
+
+        Raises:
+            AttributeError: Description
         """
+        if self.payoffs is None:
+            raise AttributeError("duels is None")
+        if self.best_lottery is None:
+            raise AttributeError("best_lottery is None")
+
         nodes = []
         for c in self.candidates:
             d = {}
@@ -432,9 +477,7 @@ class Election:
             d["proba"] = self.frac(p) if p > 0 else None
             nodes.append(d)
 
-        is_duels = self.duels is not None
-
-        if is_duels:
+        if self.duels is not None:
             duels2 = self.duels / self.nb_voter
 
         links = []
@@ -443,14 +486,14 @@ class Election:
                 if self.payoffs[i, j] > self.payoffs[j, i]:
                     label = (
                         "{:.2f} - {:.2f}".format(100 * duels2[i, j], 100 * duels2[j, i])
-                        if is_duels
+                        if self.duels is not None
                         else None
                     )
                     links.append({"source": i, "target": j, "label": label})
                 elif self.payoffs[i, j] < self.payoffs[j, i]:
                     label = (
                         "{:.2f} - {:.2f}".format(100 * duels2[j, i], 100 * duels2[i, j])
-                        if is_duels
+                        if self.duels is not None
                         else None
                     )
                     links.append({"source": j, "target": i, "label": label})
@@ -474,6 +517,17 @@ class Election:
         """
         Build html based on d3.js force layout template
         inspired from http://bl.ocks.org/jhb/5955887
+
+        Args:
+            width (int, optional): Description
+            height (int, optional): Description
+            linkDistance (int, optional): Description
+            linkColor (str, optional): Description
+            labelColor (str, optional): Description
+            charge (TYPE, optional): Description
+            theta (float, optional): Description
+            gravity (float, optional): Description
+            saved (bool, optional): Description
         """
         # get template
         env = jj.Environment(
@@ -510,6 +564,14 @@ class Election:
 
         # extract pieces from template
         def get_lib_name(url):
+            """Summary
+
+            Args:
+                url (TYPE): Description
+
+            Returns:
+                TYPE: Description
+            """
             return urlparse(url).path.split(".")[0][1:]
 
         soup = BeautifulSoup(html_string, "html.parser")
@@ -541,6 +603,9 @@ class Election:
     def plot_graph(self):
         """
         display graph in Jupyter notebook
+
+        Returns:
+            TYPE: Description
         """
         clear_output(wait=True)
         return HTML(self.graph_html)
@@ -618,3 +683,17 @@ class Election:
     #     )
 
     #     self.graph_html = html_output
+
+
+if __name__ == "__main__":
+    ballot = np.array(
+        [
+            [4, 7, [1, 2, 3, 5, 6, 8]],
+            [[4, 7], [2, 8], [1, 3, 5]],
+            [7, 4, [1, 2, 3, 5, 6, 8]],
+        ],
+        dtype=object,
+    )
+    elect = Election.run_election_from_ballot(ballot, nb_candidate=8)
+    print(elect.best_lottery)
+    elect.build_graph_html()
