@@ -154,14 +154,14 @@ def test_ballot9():
 
 
 def test_ballot10():
-    ballot = ((1, 2, 3, 4, 5), (5, 4, 3, (2, 1)), ((4, 5), 1, 2, 5))
+    ballot = ((1, 2, 3, 4, 5), (5, 4, 3, (2, 1)), ((4, 5), 1, 2, 3))
     elect = Election.run_election_from_ballot(ballot)
     assert {k: round(v, 12) for k, v in elect.best_lottery.items()} == {
         "A": round(0, 12),
         "B": round(0, 12),
-        "C": round(1 / 2, 12),
+        "C": round(0, 12),
         "D": round(1 / 2, 12),
-        "E": round(0, 12),
+        "E": round(1/2, 12),
     }
 
 
