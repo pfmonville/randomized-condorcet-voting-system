@@ -6,6 +6,7 @@ from typing import Any
 import string
 from collections import Counter
 
+import matplotlib.pyplot as plt
 import numpy as np
 from numpy.typing import NDArray
 import pandas as pd
@@ -192,6 +193,7 @@ class Election:
         )
         ax.set_ylabel("Value")
         ax.set_xlabel("Candidate")
+        plt.show()
 
     def run_election_from_popularity(self, seed: int | None = None):
         """
