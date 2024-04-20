@@ -513,6 +513,7 @@ class Election:
         theta=0.1,
         gravity=0.05,
         saved=False,
+        saved_file="graph.html"
     ):
         """
         Build html based on d3.js force layout template
@@ -559,7 +560,7 @@ class Election:
         if saved:
             if not os.path.exists("saved"):
                 os.makedirs("saved")
-            with open("saved/graph.html", "w") as f:
+            with open(f"saved/{saved_file}", "w") as f:
                 f.write(html_string)
 
         # extract pieces from template
@@ -610,79 +611,6 @@ class Election:
         clear_output(wait=True)
         return HTML(self.graph_html)
 
-    # def build_graph_html2(
-    #     self,
-    #     width=960,
-    #     height=500,
-    #     linkDistance=200,
-    #     linkColor="#121212",
-    #     labelColor="#aaa",
-    #     charge=-300,
-    #     theta=0.1,
-    #     gravity=0.05,
-    #     saved=False,
-    # ):
-    #     """
-    #     Build html based on d3.js force layout template
-    #     inspired from http://bl.ocks.org/jhb/5955887
-    #     """
-    #     with open("./graph/graph_template.html", "r") as f:
-    #         html = f.read()
-
-    #     dic_data = {
-    #         "__json_data__": json.dumps(self.graph_data),
-    #         "__width__": width,
-    #         "__height__": height,
-    #         "__linkDistance__": linkDistance,
-    #         "__linkColor__": '"{}"'.format(linkColor),
-    #         "__labelColor__": "{}".format(labelColor),
-    #         "__Charge__": charge,
-    #         "__Theta__": theta,
-    #         "__Gravity__": gravity,
-    #     }
-
-    #     for k, v in dic_data.items():
-    #         v2 = v if isinstance(v, str) else str(v)
-    #         html = html.replace(k, v2)
-
-    #     if saved:
-    #         if not os.path.exists("saved"):
-    #             os.makedirs("saved")
-    #         with open("saved/graph.html", "w") as f:
-    #             f.write(html)
-
-    #     soup = BeautifulSoup(html, "html.parser")
-
-    #     js = soup.find("body").find("script").contents[0]
-    #     css = soup.find("head").find("style").contents[0]
-
-    #     JS_LIBS = json.dumps(["http://d3js.org/d3.v3.min.js"])
-
-    #     html_output = """
-    #         <div id="graphdiv">
-    #         </div>
-
-    #         <style type="text/css">
-    #             %s
-    #         </style>
-
-    #         <script type="text/javascript">
-    #         require(%s, function() {
-    #             %s
-    #         });
-    #         </script>
-
-    #         """ % (
-    #         css,
-    #         JS_LIBS,
-    #         js,
-    #     )
-
-    #     html_output = html_output.replace(
-    #         "graphdiv", "graphdiv" + str(int(np.random.random() * 10000))
-    #     )
-
-    #     self.graph_html = html_output
 
 
 if __name__ == "__main__":
