@@ -445,13 +445,70 @@ class Election:
 
         # Set best lottery
         self.best_lottery = dict(zip(self.candidates, solution))
+
+    def get_best_lottery2(self):
+        from pyscipopt import Model, quicksum
+
+        if self.payoffs is None:
+            raise AttributeError("duels is None")
+        # Solver 1: Minimize maximum gain from opponent
+        model1 = Model("Solver1")
+        model1.hideOutput()
+
+        # Variables
+        v = model1.addVar("v", vtype="C")  # Variable representing the max gain
+        p = {j: model1.addVar(f"p_{j}", vtype="C", lb=0) for j in range(self.nb_candidate)}
+
+        # Objective
+        model1.setObjective(v, "minimize")
+
+        # Constraints
+        for i in range(len(self.payoffs)):
+            model1.addCons(v >= quicksum(self.payoffs[i][j] * p[j] for j in range(self.nb_candidate)))
+        model1.addCons(quicksum(p[j] for j in range(self.nb_candidate)) == 1)
+
+        # Solve model
+        model1.optimize()
+        if model1.getStatus() != "optimal":
             raise RuntimeError("Error: Solving Simplex Direct failed")
 
-        # retrieve probabilities values (p) from solution
-        solution = res_direct2.x[1:]
+        v_value = model1.getObjVal()
+        # Retrieve probabilities values (p) from solution
+        solution = {self.candidates[j]: model1.getVal(p[j]) for j in range(self.nb_candidate)}
+
+        if self.not_complete:
+            # Solver 2: Minimize the maximum probability to ensure fairness
+            model2 = Model("Solver2")
+
+            # Variables
+            z = model2.addVar("z", vtype="C")  # Variable representing the max probability
+            p2 = {j: model2.addVar(f"p_{j}", vtype="C", lb=0) for j in range(self.nb_candidate)}
+
+            # Objective
+            model2.setObjective(z, "minimize")
+            model2.hideOutput()
+
+            # Constraints
+            for i in range(len(self.payoffs)):
+                model2.addCons(quicksum(self.payoffs[i][j] * p2[j] for j in range(self.nb_candidate)) <= 0)
+            for j in range(self.nb_candidate):
+                model2.addCons(z >= p2[j])
+            model2.addCons(quicksum(p2[j] for j in range(self.nb_candidate)) == 1)
+
+            # Set the previously found value of v as constraint
+            for i in range(len(self.payoffs)):
+                model2.addCons(quicksum(self.payoffs[i][j] * p2[j] for j in range(self.nb_candidate)) <= v_value)
+
+            # Solve model
+            model2.optimize()
+            if model2.getStatus() != "optimal":
+                raise RuntimeError("Error: Solving Simplex Direct failed")
+
+            # Retrieve probabilities values (p) from solution
+            solution = {self.candidates[j]: model2.getVal(p2[j]) for j in range(self.nb_candidate)}
 
         # Set best lottery
-        self.best_lottery = dict(zip(self.candidates, solution))
+        self.best_lottery = solution
 
     @staticmethod
     def frac(x: float) -> str:
