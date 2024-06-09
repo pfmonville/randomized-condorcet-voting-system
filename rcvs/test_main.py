@@ -1,8 +1,12 @@
+# import sys
+
+# sys.path.append("G:\\Documents\\GitHub\\randomized-condorcet-voting-system\\rcvs")
+
 import string
 import numpy as np
+import pytest
 
 from .election import Election
-import pytest
 
 
 def test_run_election_from_popularity():
@@ -48,11 +52,13 @@ def test_run_election_from_popularity():
     assert np.array_equal(elect.df_payoffs, result)
     elect.get_best_lottery()
     assert elect.best_lottery == {"A": 0.0, "B": 0.0, "C": 1.0, "D": 0.0, "E": 0.0}
+    elect.get_best_lottery2()
+    assert elect.best_lottery == {"A": 0.0, "B": 0.0, "C": 1.0, "D": 0.0, "E": 0.0}
 
 
 def test_ballot1():
     ballot = np.array([[2, 0, 0, 0, 0], [3, 2, 4, 0, 0], [1, 2, 3, 0, 0]])
-    elect = Election.run_election_from_ballot(ballot, nb_candidate=5)
+    elect = Election.run_election_from_ballot(ballot, nb_candidate=5, complete_votes=False)
     assert {k: round(v, 12) for k, v in elect.best_lottery.items()} == {
         "A": round(1 / 3, 12),
         "B": round(0, 12),
@@ -61,9 +67,24 @@ def test_ballot1():
         "E": round(1 / 3, 12),
     }
 
+    elect = Election.run_election_from_ballot(ballot, nb_candidate=5)
+    assert {k: round(v, 12) for k, v in elect.best_lottery.items()} == {
+        "A": round(0, 12),
+        "B": round(1, 12),
+        "C": round(0, 12),
+        "D": round(0, 12),
+        "E": round(0, 12),
+    }
+
 
 def test_ballot2():
     ballot = np.array([[1], [2], [3]])
+    elect = Election.run_election_from_ballot(ballot, complete_votes=False)
+    assert {k: round(v, 12) for k, v in elect.best_lottery.items()} == {
+        "A": round(1 / 3, 12),
+        "B": round(1 / 3, 12),
+        "C": round(1 / 3, 12),
+    }
     elect = Election.run_election_from_ballot(ballot)
     assert {k: round(v, 12) for k, v in elect.best_lottery.items()} == {
         "A": round(1 / 3, 12),
@@ -74,6 +95,12 @@ def test_ballot2():
 
 def test_ballot3():
     ballot = np.array([[1, 2, 3], [2, 3, 1], [3, 1, 2]])
+    elect = Election.run_election_from_ballot(ballot, complete_votes=False)
+    assert {k: round(v, 12) for k, v in elect.best_lottery.items()} == {
+        "A": round(1 / 3, 12),
+        "B": round(1 / 3, 12),
+        "C": round(1 / 3, 12),
+    }
     elect = Election.run_election_from_ballot(ballot)
     assert {k: round(v, 12) for k, v in elect.best_lottery.items()} == {
         "A": round(1 / 3, 12),
@@ -83,9 +110,14 @@ def test_ballot3():
 
 
 def test_ballot4():
-    ballot = np.array(
-        [[1, 0, 0], [2, 0, 0], [3, 0, 0]]
-    )  # pb should be equal to previous line
+    ballot = np.array([[1, 0, 0], [2, 0, 0], [3, 0, 0]])
+    elect = Election.run_election_from_ballot(ballot, complete_votes=False)
+    assert {k: round(v, 12) for k, v in elect.best_lottery.items()} == {
+        "A": round(1 / 3, 12),
+        "B": round(1 / 3, 12),
+        "C": round(1 / 3, 12),
+    }
+    ballot = np.array([[1, 0, 0], [2, 0, 0], [3, 0, 0]])
     elect = Election.run_election_from_ballot(ballot)
     assert {k: round(v, 12) for k, v in elect.best_lottery.items()} == {
         "A": round(1 / 3, 12),
@@ -95,9 +127,13 @@ def test_ballot4():
 
 
 def test_ballot5():
-    ballot = np.array(
-        [[1, [2, 3]], [2, [1, 3]], [3, [1, 2]]], dtype=object
-    )  # should be 1/3 * 3
+    ballot = np.array([[1, [2, 3]], [2, [1, 3]], [3, [1, 2]]], dtype=object)
+    elect = Election.run_election_from_ballot(ballot, complete_votes=False)
+    assert {k: round(v, 12) for k, v in elect.best_lottery.items()} == {
+        "A": round(1 / 3, 12),
+        "B": round(1 / 3, 12),
+        "C": round(1 / 3, 12),
+    }
     elect = Election.run_election_from_ballot(ballot)
     assert {k: round(v, 12) for k, v in elect.best_lottery.items()} == {
         "A": round(1 / 3, 12),
@@ -108,10 +144,17 @@ def test_ballot5():
 
 def test_ballot6():
     ballot = [[2, 0, 0, 0, 0], [3, 2, 4, 0, 0], [[1, 2], 3, 0, 0, 0]]
-    elect = Election.run_election_from_ballot(ballot)
+    elect = Election.run_election_from_ballot(ballot, complete_votes=False)
     assert {k: round(v, 12) for k, v in elect.best_lottery.items()} == {
         "A": round(1 / 2, 12),
         "B": round(1 / 2, 12),
+        "C": round(0, 12),
+        "D": round(0, 12),
+    }
+    elect = Election.run_election_from_ballot(ballot)
+    assert {k: round(v, 12) for k, v in elect.best_lottery.items()} == {
+        "A": round(0, 12),
+        "B": round(1, 12),
         "C": round(0, 12),
         "D": round(0, 12),
     }
@@ -119,10 +162,18 @@ def test_ballot6():
 
 def test_ballot7():
     ballot = ((2,), (1, (2, 3, 4, 5)), (3, 2, 4), ((1, 2), 3))
-    elect = Election.run_election_from_ballot(ballot)
+    elect = Election.run_election_from_ballot(ballot, complete_votes=False)
     assert {k: round(v, 12) for k, v in elect.best_lottery.items()} == {
         "A": round(1, 12),
         "B": round(0, 12),
+        "C": round(0, 12),
+        "D": round(0, 12),
+        "E": round(0, 12),
+    }
+    elect = Election.run_election_from_ballot(ballot)
+    assert {k: round(v, 12) for k, v in elect.best_lottery.items()} == {
+        "A": round(0, 12),
+        "B": round(1, 12),
         "C": round(0, 12),
         "D": round(0, 12),
         "E": round(0, 12),
@@ -131,10 +182,18 @@ def test_ballot7():
 
 def test_ballot8():
     ballot = ((2,), (1, (2, 3, 4, 5)), (3, 2, 4), ((1, 2), 3), (5, (0, 0), 0))
-    elect = Election.run_election_from_ballot(ballot)
+    elect = Election.run_election_from_ballot(ballot, complete_votes=False)
     assert {k: round(v, 12) for k, v in elect.best_lottery.items()} == {
         "A": round(1, 12),
         "B": round(0, 12),
+        "C": round(0, 12),
+        "D": round(0, 12),
+        "E": round(0, 12),
+    }
+    elect = Election.run_election_from_ballot(ballot)
+    assert {k: round(v, 12) for k, v in elect.best_lottery.items()} == {
+        "A": round(0, 12),
+        "B": round(1, 12),
         "C": round(0, 12),
         "D": round(0, 12),
         "E": round(0, 12),
@@ -143,6 +202,14 @@ def test_ballot8():
 
 def test_ballot9():
     ballot = ((1, 2, 3, 4, 5), (5, (4, 3), 2, 1), ((4, 5), 1, 2, 3))
+    elect = Election.run_election_from_ballot(ballot, complete_votes=False)
+    assert {k: round(v, 12) for k, v in elect.best_lottery.items()} == {
+        "A": round(0, 12),
+        "B": round(0, 12),
+        "C": round(0, 12),
+        "D": round(1 / 2, 12),
+        "E": round(1 / 2, 12),
+    }
     elect = Election.run_election_from_ballot(ballot)
     assert {k: round(v, 12) for k, v in elect.best_lottery.items()} == {
         "A": round(0, 12),
@@ -155,18 +222,34 @@ def test_ballot9():
 
 def test_ballot10():
     ballot = ((1, 2, 3, 4, 5), (5, 4, 3, (2, 1)), ((4, 5), 1, 2, 3))
+    elect = Election.run_election_from_ballot(ballot, complete_votes=False)
+    assert {k: round(v, 12) for k, v in elect.best_lottery.items()} == {
+        "A": round(0, 12),
+        "B": round(0, 12),
+        "C": round(0, 12),
+        "D": round(1 / 2, 12),
+        "E": round(1 / 2, 12),
+    }
     elect = Election.run_election_from_ballot(ballot)
     assert {k: round(v, 12) for k, v in elect.best_lottery.items()} == {
         "A": round(0, 12),
         "B": round(0, 12),
         "C": round(0, 12),
         "D": round(1 / 2, 12),
-        "E": round(1/2, 12),
+        "E": round(1 / 2, 12),
     }
 
 
 def test_ballot11():
     ballot = ((1, (2, 3, 4, 5)), (2, (1, 3, 4, 5)))
+    elect = Election.run_election_from_ballot(ballot, complete_votes=False)
+    assert {k: round(v, 12) for k, v in elect.best_lottery.items()} == {
+        "A": round(1 / 2, 12),
+        "B": round(1 / 2, 12),
+        "C": round(0, 12),
+        "D": round(0, 12),
+        "E": round(0, 12),
+    }
     elect = Election.run_election_from_ballot(ballot)
     assert {k: round(v, 12) for k, v in elect.best_lottery.items()} == {
         "A": round(1 / 2, 12),
@@ -179,16 +262,27 @@ def test_ballot11():
 
 def test_ballot12():
     ballot = ((1, 2, 3), (2, 3))
-    elect = Election.run_election_from_ballot(ballot)
+    elect = Election.run_election_from_ballot(ballot, complete_votes=False)
     assert {k: round(v, 12) for k, v in elect.best_lottery.items()} == {
         "A": round(1, 12),
         "B": round(0, 12),
+        "C": round(0, 12),
+    }
+    elect = Election.run_election_from_ballot(ballot)
+    assert {k: round(v, 12) for k, v in elect.best_lottery.items()} == {
+        "A": round(1 / 2, 12),
+        "B": round(1 / 2, 12),
         "C": round(0, 12),
     }
 
 
 def test_ballot13():
     ballot = ((1, 2), (2, 1))
+    elect = Election.run_election_from_ballot(ballot, complete_votes=False)
+    assert {k: round(v, 12) for k, v in elect.best_lottery.items()} == {
+        "A": round(1 / 2, 12),
+        "B": round(1 / 2, 12),
+    }
     elect = Election.run_election_from_ballot(ballot)
     assert {k: round(v, 12) for k, v in elect.best_lottery.items()} == {
         "A": round(1 / 2, 12),
@@ -198,6 +292,14 @@ def test_ballot13():
 
 def test_ballot14():
     ballot = ((1, 5, (2, 3, 4)), (2, (1, 3, 4, 5)))
+    elect = Election.run_election_from_ballot(ballot, complete_votes=False)
+    assert {k: round(v, 12) for k, v in elect.best_lottery.items()} == {
+        "A": round(1 / 2, 12),
+        "B": round(1 / 2, 12),
+        "C": round(0, 12),
+        "D": round(0, 12),
+        "E": round(0, 12),
+    }
     elect = Election.run_election_from_ballot(ballot)
     assert {k: round(v, 12) for k, v in elect.best_lottery.items()} == {
         "A": round(1 / 2, 12),
@@ -210,6 +312,14 @@ def test_ballot14():
 
 def test_ballot15():
     ballot = ((1, (2, 3, 4, 5)), (2, (1, 3, 4, 5)), (5, 4, 3, 2, 1))
+    elect = Election.run_election_from_ballot(ballot, complete_votes=False)
+    assert {k: round(v, 12) for k, v in elect.best_lottery.items()} == {
+        "A": round(0, 12),
+        "B": round(1 / 2, 12),
+        "C": round(0, 12),
+        "D": round(0, 12),
+        "E": round(1 / 2, 12),
+    }
     elect = Election.run_election_from_ballot(ballot)
     assert {k: round(v, 12) for k, v in elect.best_lottery.items()} == {
         "A": round(0, 12),
@@ -228,6 +338,14 @@ def test_ballot16():
         (4, (5, 3, 2, 1)),
         (5, (4, 3, 2, 1)),
     )
+    elect = Election.run_election_from_ballot(ballot, complete_votes=False)
+    assert {k: round(v, 12) for k, v in elect.best_lottery.items()} == {
+        "A": round(1 / 5, 12),
+        "B": round(1 / 5, 12),
+        "C": round(1 / 5, 12),
+        "D": round(1 / 5, 12),
+        "E": round(1 / 5, 12),
+    }
     elect = Election.run_election_from_ballot(ballot)
     assert {k: round(v, 12) for k, v in elect.best_lottery.items()} == {
         "A": round(1 / 5, 12),
@@ -240,6 +358,13 @@ def test_ballot16():
 
 def test_ballot17():
     ballot = [(4, 1, 3), (3, 2, 4), (1, 3, 2), (2, 4, 1)]
+    elect = Election.run_election_from_ballot(ballot, complete_votes=False)
+    assert {k: round(v, 12) for k, v in elect.best_lottery.items()} == {
+        "A": round(1 / 4, 12),
+        "B": round(1 / 4, 12),
+        "C": round(1 / 4, 12),
+        "D": round(1 / 4, 12),
+    }
     elect = Election.run_election_from_ballot(ballot)
     assert {k: round(v, 12) for k, v in elect.best_lottery.items()} == {
         "A": round(1 / 4, 12),
@@ -251,6 +376,14 @@ def test_ballot17():
 
 def test_ballot18():
     ballot = ((1, (2, 3, 4, 5)), (2, (1, 3, 4, 5)), (5, 4, 3, 2, 1), (5, 4, 3, 2, 1))
+    elect = Election.run_election_from_ballot(ballot, complete_votes=False)
+    assert {k: round(v, 12) for k, v in elect.best_lottery.items()} == {
+        "A": round(0, 12),
+        "B": round(0, 12),
+        "C": round(0, 12),
+        "D": round(0, 12),
+        "E": round(1, 12),
+    }
     elect = Election.run_election_from_ballot(ballot)
     assert {k: round(v, 12) for k, v in elect.best_lottery.items()} == {
         "A": round(0, 12),
@@ -263,6 +396,12 @@ def test_ballot18():
 
 def test_ballot19():
     ballot = ((1, 2, 3), (2, 3, 1), (3, 1, 2))
+    elect = Election.run_election_from_ballot(ballot, complete_votes=False)
+    assert {k: round(v, 12) for k, v in elect.best_lottery.items()} == {
+        "A": round(1 / 3, 12),
+        "B": round(1 / 3, 12),
+        "C": round(1 / 3, 12),
+    }
     elect = Election.run_election_from_ballot(ballot)
     assert {k: round(v, 12) for k, v in elect.best_lottery.items()} == {
         "A": round(1 / 3, 12),
@@ -274,11 +413,20 @@ def test_ballot19():
 def test_ballot20():
     ballot = ()
     with pytest.raises(AttributeError):
+        elect = Election.run_election_from_ballot(ballot, complete_votes=False)
+    with pytest.raises(AttributeError):
         elect = Election.run_election_from_ballot(ballot)
 
 
 def test_ballot21():
     ballot = (("A", "B"), ("C", "D"))
+    elect = Election.run_election_from_ballot(ballot, complete_votes=False)
+    assert {k: round(v, 12) for k, v in elect.best_lottery.items()} == {
+        "A": round(1 / 2, 12),
+        "B": round(0, 12),
+        "C": round(1 / 2, 12),
+        "D": round(0, 12),
+    }
     elect = Election.run_election_from_ballot(ballot)
     assert {k: round(v, 12) for k, v in elect.best_lottery.items()} == {
         "A": round(1 / 2, 12),
@@ -291,8 +439,12 @@ def test_ballot21():
 def test_ballot22():
     ballot = (("A", "B"), (3, 4))
     with pytest.raises(AttributeError):
+        elect = Election.run_election_from_ballot(ballot, complete_votes=False)
+    with pytest.raises(AttributeError):
         elect = Election.run_election_from_ballot(ballot)
     ballot = (("A", "B"), ("C", 4))
+    with pytest.raises(AttributeError):
+        elect = Election.run_election_from_ballot(ballot, complete_votes=False)
     with pytest.raises(AttributeError):
         elect = Election.run_election_from_ballot(ballot)
 
@@ -303,6 +455,14 @@ def test_ballot23():
         ("Ben", ("Yoda", "Chewie"), "Han", "Luc"),
         (("Yoda", "Ben"), "Luc", "Han", "Chewie"),
     )
+    elect = Election.run_election_from_ballot(ballot, complete_votes=False)
+    assert {k: round(v, 12) for k, v in elect.best_lottery.items()} == {
+        "Luc": round(0, 12),
+        "Han": round(0, 12),
+        "Chewie": round(0, 12),
+        "Yoda": round(1 / 2, 12),
+        "Ben": round(1 / 2, 12),
+    }
     elect = Election.run_election_from_ballot(ballot)
     assert {k: round(v, 12) for k, v in elect.best_lottery.items()} == {
         "Luc": round(0, 12),

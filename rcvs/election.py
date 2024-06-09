@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import os
 import json
 from collections.abc import Iterable, Sequence
@@ -65,19 +67,24 @@ class Election:
         self.best_lottery = None
         self.graph_data = None
         self.graph_html = None
+        self.not_complete = False
 
     @staticmethod
     def run_election_from_ballot(
-        ballot: Ballot, nb_candidate: int | None = None
-    ) -> "Election":
+        ballot: Ballot, nb_candidate: int | None = None, complete_votes: bool = True
+    ) -> Election:
         """Runs the election from ballot given
 
         Args:
             ballot (Ballot): list of each vote
             nb_candidate (int | None, optional): Force number of candidates
+            complete_votes (bool, optional): True to complete each vote with missing candidates as all equals and at the bottom of the vote, False to ommit missing candidates
 
-        No Longer Returned:
+        Returns:
             Election: the election with best lottery computed
+
+        Raises:
+            AttributeError: raised if the ballot is empty or contains a mix of index and names
         """
 
         def mixed_flatten(seq: Vote) -> list[Any]:
@@ -127,23 +134,36 @@ class Election:
                 result.append(v)
             return result
 
+        def complete_ballot(ballot: Ballot, nb_candidate: int) -> Ballot:
+            """Complete the ballot with remaining candidates which were not specified in the vote
+            They all have the same weight in the vote, at the bottom of it
+
+            a vote like [1,3,5,7] with 8 candidates will become [1,3,5,7,[2,4,6,8]]
+
+            Args:
+                ballot (Ballot): the starting ballot
+                nb_candidate (int): number of candidates
+
+            Returns:
+                Ballot: the resulting ballot
+            """
+            all_candidates = set(range(1, nb_candidate + 1))
+            flat_ballots = [mixed_flatten(x) for x in ballot]
+            for i, flat_vote in enumerate(flat_ballots):
+                if x := (all_candidates - set(flat_vote)):
+                    ballot[i] = ballot[i] + [list(x)]
+            return ballot
+
         if len(ballot) == 0:
             raise AttributeError(f"The ballot is empty : {ballot}")
         flat_ballot = mixed_flatten(it.chain.from_iterable(ballot))
         if len(set(type(c) for c in flat_ballot)) >= 2:
-            raise AttributeError(
-                "Ballot cannot be a mixed of types, only int or only str"
-            )
+            raise AttributeError("Ballot cannot be a mixed of types, only int or only str")
         if all(isinstance(c, str) for c in flat_ballot):
             candidates = list(set(flat_ballot))
             nb_candidate = len(candidates)
             ballot = [
-                [
-                    candidates.index(c) + 1
-                    if isinstance(c, str)
-                    else [candidates.index(d) + 1 for d in c]
-                    for c in b
-                ]
+                [candidates.index(c) + 1 if isinstance(c, str) else [candidates.index(d) + 1 for d in c] for c in b]
                 for b in ballot
             ]
         else:
@@ -153,6 +173,8 @@ class Election:
             candidates = list(string.ascii_uppercase)[:nb_candidate]
         if max(max(Counter(mixed_flatten(x)).values()) for x in ballot) > 1:
             raise AttributeError("Ballot cannot contains same candidate multiple times")
+        if complete_votes:
+            ballot = complete_ballot(ballot=ballot, nb_candidate=nb_candidate)
         nb_voter = len(ballot)
         proba_ranked = None
         popularity = None
@@ -188,9 +210,7 @@ class Election:
             index=self.candidates,
             columns=["Ranked Proba", "Popularity"],
         )
-        ax = df.plot.bar(
-            figsize=(12, 5), title="Overview of Candidates Ranked Proba and Popularity"
-        )
+        ax = df.plot.bar(figsize=(12, 5), title="Overview of Candidates Ranked Proba and Popularity")
         ax.set_ylabel("Value")
         ax.set_xlabel("Candidate")
         plt.show()
@@ -216,9 +236,7 @@ class Election:
             Exception: Description
         """
         if self.proba_ranked is None or self.popularity is None:
-            raise Exception(
-                "the election must have proba_ranked and popularity attributes set to run election"
-            )
+            raise Exception("the election must have proba_ranked and popularity attributes set to run election")
         if seed is not None:
             np.random.seed(seed)
 
@@ -259,9 +277,7 @@ class Election:
                             if loser > 0:
                                 duels[winner - 1, loser - 1] += 1
 
-        df_duels = pd.DataFrame(
-            data=duels, index=self.candidates, columns=self.candidates
-        )
+        df_duels = pd.DataFrame(data=duels, index=self.candidates, columns=self.candidates)
         df_duels.index.name = "winner"
         df_duels.columns.name = "loser"
 
@@ -300,17 +316,9 @@ class Election:
         if self.duels is None:
             raise AttributeError("duels is None")
 
-        ballot_sizes = [
-            [len(x) if isinstance(x, Sequence) else 1 for x in ballot if x != 0]
-            for ballot in self.ballot
-        ]
+        ballot_sizes = [[len(x) if isinstance(x, Sequence) else 1 for x in ballot if x != 0] for ballot in self.ballot]
         n_ballots = np.sum(
-            np.concatenate(
-                [
-                    np.prod(my_combinations(ballot_size, 2), 1)
-                    for ballot_size in ballot_sizes
-                ]
-            )
+            np.concatenate([np.prod(my_combinations(ballot_size, 2), 1) for ballot_size in ballot_sizes])
         )
         n_duels = int(self.duels.sum())
 
@@ -343,9 +351,7 @@ class Election:
                     payoffs[j, i] = 1
                     payoffs[i, j] = -1
 
-        df_payoffs = pd.DataFrame(
-            data=payoffs, index=self.candidates, columns=self.candidates
-        )
+        df_payoffs = pd.DataFrame(data=payoffs, index=self.candidates, columns=self.candidates)
         df_payoffs.index.name = "winner"
         df_payoffs.columns.name = "loser"
 
@@ -360,6 +366,7 @@ class Election:
             print("The solver will return the fairest lottery between")
             print("those which share the same minimax objective value")
             print("#" * 60, "\n\n")
+            self.not_complete = True
 
     def get_best_lottery(self):
         """
@@ -394,45 +401,50 @@ class Election:
 
         # define objective as minimizing the maximum gain from opponent
         c = np.array([1, *[0 for _ in range(self.nb_candidate)]])
-        res_direct = linprog(
-            c, A_ub=A_ub, b_ub=b_ub, A_eq=A_eq, b_eq=b_eq, method="highs"
-        )
+        res_direct = linprog(c, A_ub=A_ub, b_ub=b_ub, A_eq=A_eq, b_eq=b_eq, method="highs")
         if not res_direct.success:
             raise RuntimeError("Error: Solving Simplex Direct failed")
 
         # get solution from solver 1
         v = res_direct.fun
+        solution = res_direct.x[1:]
 
-        # ===============
-        # Solver 2
-        # ===============
+        if self.not_complete:
+            # ===============
+            # Solver 2
+            # ===============
 
-        # define the maximum value between each opponent strategy
-        # v ⩾ ∑_j(A[i,j]*p[j]) ∀i
-        cons1 = np.c_[
-            np.zeros((self.nb_candidate)),
-            self.payoffs,
-        ]
-        # défine z as the maximum between all probabilities of each play
-        # z ⩾ p[j] ∀j
-        cons2 = np.c_[
-            -np.ones((self.nb_candidate)),
-            np.eye((self.nb_candidate)),
-        ]
-        A_ub2 = np.r_[cons1, cons2]
-        b_ub2 = np.r_[np.zeros((len(cons1))), np.zeros((len(cons2))) + v]
+            # define the maximum value between each opponent strategy
+            # v ⩾ ∑_j(A[i,j]*p[j]) ∀i
+            cons1 = np.c_[
+                np.zeros((self.nb_candidate)),
+                self.payoffs,
+            ]
+            # défine z as the maximum between all probabilities of each play
+            # z ⩾ p[j] ∀j
+            cons2 = np.c_[
+                -np.ones((self.nb_candidate)),
+                np.eye((self.nb_candidate)),
+            ]
+            A_ub2 = np.r_[cons1, cons2]
+            b_ub2 = np.r_[np.zeros((len(cons1))), np.zeros((len(cons2))) + v]
 
-        # défine that the sum of all probabilities for plays is 1
-        # ∑_j(p[j]) == 1
-        A_eq2 = np.array([[0, *[1 for _ in range(self.nb_candidate)]]])
-        b_eq2 = 1
+            # défine that the sum of all probabilities for plays is 1
+            # ∑_j(p[j]) == 1
+            A_eq2 = np.array([[0, *[1 for _ in range(self.nb_candidate)]]])
+            b_eq2 = 1
 
-        # define objective as minimizing the maximum probability of a play (which cause fairness)
-        c2 = np.array([1, *[0 for _ in range(self.nb_candidate)]])
-        res_direct2 = linprog(
-            c2, A_ub=A_ub2, b_ub=b_ub2, A_eq=A_eq2, b_eq=b_eq2, method="highs"
-        )
-        if not res_direct2.success:
+            # define objective as minimizing the maximum probability of a play (which cause fairness)
+            c2 = np.array([1, *[0 for _ in range(self.nb_candidate)]])
+            res_direct2 = linprog(c2, A_ub=A_ub2, b_ub=b_ub2, A_eq=A_eq2, b_eq=b_eq2, method="highs")
+            if not res_direct2.success:
+                raise RuntimeError("Error: Solving Simplex Direct failed")
+
+            # retrieve probabilities values (p) from solution
+            solution = res_direct2.x[1:]
+
+        # Set best lottery
+        self.best_lottery = dict(zip(self.candidates, solution))
             raise RuntimeError("Error: Solving Simplex Direct failed")
 
         # retrieve probabilities values (p) from solution
@@ -515,7 +527,7 @@ class Election:
         theta=0.1,
         gravity=0.05,
         saved=False,
-        saved_file="graph.html"
+        saved_file="graph.html",
     ):
         """
         Build html based on d3.js force layout template
