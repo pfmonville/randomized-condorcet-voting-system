@@ -199,7 +199,7 @@ class Election:
         elect.build_table_duels()
         elect.check_table_duels()
         elect.build_table_payoff()
-        elect.get_best_lottery2()
+        elect.get_best_lottery()
 
         return elect
 
@@ -375,7 +375,7 @@ class Election:
             print("#" * 60, "\n\n")
             self.not_complete = True
 
-    def get_best_lottery(self):
+    def get_best_lottery(self, exclude: list[str] | None = None):
         """
         Determine best solution to problem
         Gets the lexicographic solution for bi-objective
@@ -388,23 +388,28 @@ class Election:
         No Longer Raises:
             Exception: Description
         """
-
+        if self.payoffs is None:
+            raise AttributeError("duels is None")
+        indices = [self.candidates.index(x) for x in self.candidates if x not in (exclude or [])]
+        exclude_indices = [list(string.ascii_uppercase).index(x) for x in exclude or []]
+        remaining_candidates = [x for x in self.candidates if x not in (exclude or [])]
         # ===============
         # Solver 1
         # ===============
 
         # define the maximum value between each opponent strategy
         # v ⩾ ∑_j(A[i,j]*p[j]) ∀i
-        A_ub = np.c_[-np.ones((self.nb_candidate)), self.payoffs]
+        current_payoff = np.delete(np.delete(self.payoffs, exclude_indices, 0), exclude_indices, 1)
+        A_ub = np.c_[-np.ones((len(indices))), current_payoff]
         b_ub = np.zeros((len(A_ub)))
 
         # défine that the sum of all probabilities for plays is 1
         # ∑_j(p[j]) == 1
-        A_eq = np.array([[0, *[1 for _ in range(self.nb_candidate)]]])
+        A_eq = np.array([[0, *[1 for _ in indices]]])
         b_eq = 1
 
         # define objective as minimizing the maximum gain from opponent
-        c = np.array([1, *[0 for _ in range(self.nb_candidate)]])
+        c = np.array([1, *[0 for _ in indices]])
         res_direct = linprog(c, A_ub=A_ub, b_ub=b_ub, A_eq=A_eq, b_eq=b_eq, method="highs")
         if not res_direct.success:
             raise RuntimeError("Error: Solving Simplex Direct failed")
@@ -420,20 +425,20 @@ class Election:
 
             # define the maximum value between each opponent strategy
             # v ⩾ ∑_j(A[i,j]*p[j]) ∀i
-            cons1 = np.c_[np.zeros((self.nb_candidate)), self.payoffs]
+            cons1 = np.c_[np.zeros((len(indices))), current_payoff]
             # défine z as the maximum between all probabilities of each play
             # z ⩾ p[j] ∀j
-            cons2 = np.c_[-np.ones((self.nb_candidate)), np.eye((self.nb_candidate))]
+            cons2 = np.c_[-np.ones((len(indices))), np.eye((len(indices)))]
             A_ub2 = np.r_[cons1, cons2]
             b_ub2 = np.r_[np.zeros((len(cons1))), np.zeros((len(cons2))) + v]
 
             # défine that the sum of all probabilities for plays is 1
             # ∑_j(p[j]) == 1
-            A_eq2 = np.array([[0, *[1 for _ in range(self.nb_candidate)]]])
+            A_eq2 = np.array([[0, *[1 for _ in indices]]])
             b_eq2 = 1
 
             # define objective as minimizing the maximum probability of a play (which cause fairness)
-            c2 = np.array([1, *[0 for _ in range(self.nb_candidate)]])
+            c2 = np.array([1, *[0 for _ in indices]])
             res_direct2 = linprog(c2, A_ub=A_ub2, b_ub=b_ub2, A_eq=A_eq2, b_eq=b_eq2, method="highs")
             if not res_direct2.success:
                 raise RuntimeError("Error: Solving Simplex Direct failed")
@@ -442,11 +447,14 @@ class Election:
             solution = res_direct2.x[1:]
 
         # Set best lottery
-        self.best_lottery = dict(zip(self.candidates, solution))
+        self.best_lottery = dict(zip(remaining_candidates, solution))
 
-    def get_best_lottery2(self):
+    def get_best_lottery2(self, exclude: list[str] | None = None):
         from pyscipopt import Model, quicksum
 
+        indices = [self.candidates.index(x) for x in self.candidates if x not in (exclude or [])]
+        if len(indices) == 0:
+            raise AttributeError("no more candidates remain after removing all exclude ones")
         if self.payoffs is None:
             raise AttributeError("duels is None")
         # Solver 1: Minimize maximum gain from opponent
@@ -455,15 +463,15 @@ class Election:
 
         # Variables
         v = model1.addVar("v", vtype="C")  # Variable representing the max gain
-        p = {j: model1.addVar(f"p_{j}", vtype="C", lb=0) for j in range(self.nb_candidate)}
+        p = {j: model1.addVar(f"p_{j}", vtype="C", lb=0) for j in indices}
 
         # Objective
         model1.setObjective(v, "minimize")
 
         # Constraints
-        for i in range(len(self.payoffs)):
-            model1.addCons(v >= quicksum(self.payoffs[i][j] * p[j] for j in range(self.nb_candidate)))
-        model1.addCons(quicksum(p[j] for j in range(self.nb_candidate)) == 1)
+        for i in indices:
+            model1.addCons(v >= quicksum(self.payoffs[i][j] * p[j] for j in indices))
+        model1.addCons(quicksum(p[j] for j in indices) == 1)
 
         # Solve model
         model1.optimize()
@@ -472,7 +480,7 @@ class Election:
 
         v_value = model1.getObjVal()
         # Retrieve probabilities values (p) from solution
-        solution = {self.candidates[j]: model1.getVal(p[j]) for j in range(self.nb_candidate)}
+        solution = {self.candidates[j]: model1.getVal(p[j]) for j in indices}
 
         if self.not_complete:
             # Solver 2: Minimize the maximum probability to ensure fairness
@@ -480,22 +488,22 @@ class Election:
 
             # Variables
             z = model2.addVar("z", vtype="C")  # Variable representing the max probability
-            p2 = {j: model2.addVar(f"p_{j}", vtype="C", lb=0) for j in range(self.nb_candidate)}
+            p2 = {j: model2.addVar(f"p_{j}", vtype="C", lb=0) for j in indices}
 
             # Objective
             model2.setObjective(z, "minimize")
             model2.hideOutput()
 
             # Constraints
-            for i in range(len(self.payoffs)):
-                model2.addCons(quicksum(self.payoffs[i][j] * p2[j] for j in range(self.nb_candidate)) <= 0)
-            for j in range(self.nb_candidate):
+            for i in indices:
+                model2.addCons(quicksum(self.payoffs[i][j] * p2[j] for j in indices) <= 0)
+            for j in indices:
                 model2.addCons(z >= p2[j])
-            model2.addCons(quicksum(p2[j] for j in range(self.nb_candidate)) == 1)
+            model2.addCons(quicksum(p2[j] for j in indices) == 1)
 
             # Set the previously found value of v as constraint
-            for i in range(len(self.payoffs)):
-                model2.addCons(quicksum(self.payoffs[i][j] * p2[j] for j in range(self.nb_candidate)) <= v_value)
+            for i in indices:
+                model2.addCons(quicksum(self.payoffs[i][j] * p2[j] for j in indices) <= v_value)
 
             # Solve model
             model2.optimize()
@@ -503,7 +511,7 @@ class Election:
                 raise RuntimeError("Error: Solving Simplex Direct failed")
 
             # Retrieve probabilities values (p) from solution
-            solution = {self.candidates[j]: model2.getVal(p2[j]) for j in range(self.nb_candidate)}
+            solution = {self.candidates[j]: model2.getVal(p2[j]) for j in indices}
 
         # Set best lottery
         self.best_lottery = solution
@@ -700,54 +708,32 @@ class Election:
         elect = Election.run_election_from_ballot(ballot, nb_candidate=nb_candidate, complete_votes=complete_votes)
         if (nb_candidate is not None and nb_winners > nb_candidate) or nb_winners > elect.nb_candidate:
             raise ValueError("too many winners asked")
-        hopefull = itz.valfilter(lambda x: x > 0, elect.best_lottery)
-        final_winners = list(hopefull.keys())
         discarded_hopefull = []
         i = 1
-        if len(hopefull) > (k := nb_winners):
-            final_winners = list(
-                np.random.choice(list(hopefull.keys()), size=k, replace=False, p=list(hopefull.values()))
-            )
-            discarded_hopefull.extend(
-                [f"{x}*{hopefull[x]:.2f}|1" for x in list(hopefull.keys()) if x not in final_winners]
-            )
-        winners = final_winners
-        winners_display = [
-            f"{x}{f"*{hopefull[x]:.2f}" if len(hopefull) > (nb_winners - len(winners)) else ""}|{i}"
-            for x in final_winners
-        ]
-        while len(winners) < nb_winners:
-            i += 1
-            ballot = [
-                [
-                    (
-                        [can for y in x if (can := elect.candidates[y - 1]) not in winners]
-                        if isinstance(x, list)
-                        else elect.candidates[x - 1]
-                    )
-                    for x in z
-                    if (isinstance(x, list) and len(x) > 0)
-                    or ((not isinstance(x, list)) and elect.candidates[x - 1] not in winners)
-                ]
-                for z in elect.ballot
-            ]
-            elect = Election.run_election_from_ballot(ballot, complete_votes=complete_votes)
+        winners = []
+        winners_display = []
+        while True:
             hopefull = itz.valfilter(lambda x: x > 0, elect.best_lottery)
             final_winners = list(hopefull.keys())
             if len(hopefull) > (k := nb_winners - len(winners)):
-                final_winners = np.random.choice(
-                    list(hopefull.keys()), size=k, replace=False, p=list(hopefull.values())
+                final_winners = list(
+                    np.random.choice(list(hopefull.keys()), size=k, replace=False, p=list(hopefull.values()))
                 )
                 discarded_hopefull.extend(
                     [f"{x}*{hopefull[x]:.2f}|{i}" for x in list(hopefull.keys()) if x not in final_winners]
                 )
+            winners.extend(final_winners)
             winners_display.extend(
                 [
                     f"{x}{f"*{hopefull[x]:.2f}" if len(hopefull) > (nb_winners - len(winners)) else ""}|{i}"
                     for x in final_winners
                 ]
             )
-            winners.extend(final_winners)
+            if len(winners) >= nb_winners:
+                break
+            elect.get_best_lottery(exclude=winners)
+            i += 1
+
         return winners_display, discarded_hopefull
 
 
