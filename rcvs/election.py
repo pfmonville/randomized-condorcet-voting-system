@@ -73,8 +73,78 @@ class Election:
         self.not_complete = False
 
     @staticmethod
+    def _remove_zeros(ballot: Ballot) -> Ballot:
+        """Removes all zeros in ballot
+
+        (1,2,3,0,0,0) -> (1,2,3)
+        (1,0,2,0,3,0) -> (1,2,3)
+        (1,(2,3),(0,0)) -> (1,(2,3))
+        (1,(2,0,3),(0,4),(0,5,0),(0,0)) -> (1,(2,3),4,5)
+
+        Args:
+            ballot (Iterable[Ballot]): the ballot to remove zeros from
+
+        Returns:
+            Iterable[Ballot]: the processed ballot
+        """
+        result = []
+        for vote in ballot:
+            v = []
+            for level in vote:
+                if level == 0:
+                    continue
+                if isinstance(level, Iterable):
+                    trimed = [x for x in level if x != 0]
+                    if not trimed:
+                        continue
+                    v.append(trimed)
+                else:
+                    v.append(level)
+            result.append(v)
+        return result
+
+    @classmethod
+    def _complete_ballot(cls, ballot: Ballot, nb_candidate: int) -> Ballot:
+        """Complete the ballot with remaining candidates which were not specified in the vote
+        They all have the same weight in the vote, at the bottom of it
+
+        a vote like [1,3,5,7] with 8 candidates will become [1,3,5,7,[2,4,6,8]]
+
+        Args:
+            ballot (Ballot): the starting ballot
+            nb_candidate (int): number of candidates
+
+        Returns:
+            Ballot: the resulting ballot
+        """
+        all_candidates = set(range(1, nb_candidate + 1))
+        flat_ballots = [cls._mixed_flatten(x) for x in ballot]
+        for i, flat_vote in enumerate(flat_ballots):
+            if x := (all_candidates - set(flat_vote)):
+                ballot[i] = ballot[i] + [list(x)]
+        return ballot
+
+    @staticmethod
+    def _mixed_flatten(seq: Vote) -> list[Any]:
+        """Flattens a mixed list of "elements" and "list of elements"
+
+        Args:
+            seq (Vote): the list to flatten
+
+        Returns:
+            list[Any]: the flatten list
+        """
+        flatten_list = []
+        for el in seq:
+            if isinstance(el, Iterable) and not isinstance(el, str):
+                flatten_list.extend(el)
+            else:
+                flatten_list.append(el)
+        return flatten_list
+
+    @classmethod
     def run_election_from_ballot(
-        ballot: Ballot, nb_candidate: int | None = None, complete_votes: bool = True
+        cls, ballot: Ballot, nb_candidate: int | None = None, complete_votes: bool = True
     ) -> Election:
         """Runs the election from ballot given
 
@@ -90,77 +160,10 @@ class Election:
             AttributeError: raised if the ballot is empty or contains a mix of index and names
         """
 
-        def mixed_flatten(seq: Vote) -> list[Any]:
-            """Flattens a mixed list of "elements" and "list of elements"
-
-            Args:
-                seq (Vote): the list to flatten
-
-            Returns:
-                list[Any]: the flatten list
-            """
-            flatten_list = []
-            for el in seq:
-                if isinstance(el, Iterable) and not isinstance(el, str):
-                    flatten_list.extend(el)
-                else:
-                    flatten_list.append(el)
-            return flatten_list
-
-        def remove_zeros(ballot: Ballot) -> Ballot:
-            """Removes all zeros in ballot
-
-            (1,2,3,0,0,0) -> (1,2,3)
-            (1,0,2,0,3,0) -> (1,2,3)
-            (1,(2,3),(0,0)) -> (1,(2,3))
-            (1,(2,0,3),(0,4),(0,5,0),(0,0)) -> (1,(2,3),4,5)
-
-            Args:
-                ballot (Iterable[Ballot]): the ballot to remove zeros from
-
-            Returns:
-                Iterable[Ballot]: the processed ballot
-            """
-            result = []
-            for vote in ballot:
-                v = []
-                for level in vote:
-                    if level == 0:
-                        continue
-                    if isinstance(level, Iterable):
-                        trimed = [x for x in level if x != 0]
-                        if not trimed:
-                            continue
-                        v.append(trimed)
-                    else:
-                        v.append(level)
-                result.append(v)
-            return result
-
-        def complete_ballot(ballot: Ballot, nb_candidate: int) -> Ballot:
-            """Complete the ballot with remaining candidates which were not specified in the vote
-            They all have the same weight in the vote, at the bottom of it
-
-            a vote like [1,3,5,7] with 8 candidates will become [1,3,5,7,[2,4,6,8]]
-
-            Args:
-                ballot (Ballot): the starting ballot
-                nb_candidate (int): number of candidates
-
-            Returns:
-                Ballot: the resulting ballot
-            """
-            all_candidates = set(range(1, nb_candidate + 1))
-            flat_ballots = [mixed_flatten(x) for x in ballot]
-            for i, flat_vote in enumerate(flat_ballots):
-                if x := (all_candidates - set(flat_vote)):
-                    ballot[i] = ballot[i] + [list(x)]
-            return ballot
-
         if len(ballot) == 0:
             raise AttributeError(f"The ballot is empty : {ballot}")
         ballot = [x for x in ballot if isinstance(x, (int, str)) or len(x) > 0]
-        flat_ballot = mixed_flatten(it.chain.from_iterable(ballot))
+        flat_ballot = cls._mixed_flatten(it.chain.from_iterable(ballot))
         if len(set(type(c) for c in flat_ballot)) >= 2:
             raise AttributeError("Ballot cannot be a mixed of types, only int or only str")
         if nb_candidate is not None and (x := len(set(flat_ballot))) > nb_candidate:
@@ -173,14 +176,14 @@ class Election:
                 for b in ballot
             ]
         else:
-            ballot = remove_zeros(ballot)
+            ballot = cls._remove_zeros(ballot)
             if nb_candidate is None:
-                nb_candidate = len(set(mixed_flatten(it.chain.from_iterable(ballot))))
+                nb_candidate = len(set(cls._mixed_flatten(it.chain.from_iterable(ballot))))
             candidates = list(string.ascii_uppercase)[:nb_candidate]
-        if max(max(Counter(mixed_flatten(x)).values()) for x in ballot) > 1:
+        if max(max(Counter(cls._mixed_flatten(x)).values()) for x in ballot) > 1:
             raise AttributeError("Ballot cannot contains same candidate multiple times")
         if complete_votes:
-            ballot = complete_ballot(ballot=ballot, nb_candidate=nb_candidate)
+            ballot = cls._complete_ballot(ballot=ballot, nb_candidate=nb_candidate)
         nb_voter = len(ballot)
         proba_ranked = None
         popularity = None
@@ -259,7 +262,9 @@ class Election:
 
         sorted_ranked_candidates = ranked_candidates[tuple(idx)]
 
-        self.ballot = (1 + order) * sorted_ranked_candidates
+        ballot = (1 + order) * sorted_ranked_candidates
+        ballot = self._remove_zeros(ballot)
+        self.ballot = ballot
 
     def build_table_duels(self):
         """
@@ -722,13 +727,13 @@ class Election:
                 discarded_hopefull.extend(
                     [f"{x}*{hopefull[x]:.2f}|{i}" for x in list(hopefull.keys()) if x not in final_winners]
                 )
-            winners.extend(final_winners)
             winners_display.extend(
                 [
                     f"{x}{f"*{hopefull[x]:.2f}" if len(hopefull) > (nb_winners - len(winners)) else ""}|{i}"
                     for x in final_winners
                 ]
             )
+            winners.extend(final_winners)
             if len(winners) >= nb_winners:
                 break
             elect.get_best_lottery(exclude=winners)
@@ -738,6 +743,32 @@ class Election:
 
 
 if __name__ == "__main__":
+    seed = 123456
+    np.random.seed(seed)
+
+    nb_candidate = 10
+    candidates = list(string.ascii_uppercase)[:nb_candidate]
+    proba_ranked = list(np.random.rand(nb_candidate))
+    popularity = list(np.random.rand(nb_candidate))
+    nb_voter = int(1e5)
+    elect = Election(
+        nb_candidate=nb_candidate,
+        nb_voter=nb_voter,
+        candidates=candidates,
+        proba_ranked=proba_ranked,
+        popularity=popularity,
+        ballot=[],
+    )
+    elect.run_election_from_popularity(seed=12345)
+    elect.build_table_duels()
+    elect.build_table_payoff()
+    elect.get_best_lottery()
+    print(elect.best_lottery)
+    winners, discarded = Election.pick_multiple_winners_from_ballot(
+        elect.ballot, nb_winners=6, nb_candidate=nb_candidate
+    )
+    print(winners, discarded)
+
     ballot = np.array(
         [
             [4, 7, [1, 2, 3, 5, 6, 8]],
