@@ -15,8 +15,8 @@ def test_run_election_from_popularity():
 
     nb_candidate = 5
     candidates = list(string.ascii_uppercase)[:nb_candidate]
-    proba_ranked = np.random.rand(nb_candidate)
-    popularity = np.random.rand(nb_candidate)
+    proba_ranked = list(np.random.rand(nb_candidate))
+    popularity = list(np.random.rand(nb_candidate))
     nb_voter = int(1e3)
     elect = Election(
         nb_candidate=nb_candidate,

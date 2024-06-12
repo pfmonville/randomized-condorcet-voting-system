@@ -47,7 +47,7 @@ class Election:
         self,
         nb_candidate: int,
         nb_voter: int,
-        ballot: Ballot,
+        ballot: Ballot | None = None,
         candidates: list[str] | None = None,
         proba_ranked: list[float] | None = None,
         popularity: list[float] | None = None,
@@ -60,7 +60,7 @@ class Election:
             self.candidates = candidates
         self.proba_ranked = proba_ranked
         self.popularity = popularity
-        self.ballot = ballot
+        self.ballot = ballot or []
         self.df_ballot = None
         self.duels = None
         self.df_duels = None
