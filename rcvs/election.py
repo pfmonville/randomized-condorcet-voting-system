@@ -8,6 +8,7 @@ from typing import Any
 import string
 from collections import Counter
 
+from tqdm import tqdm
 import toolz as itz
 import matplotlib.pyplot as plt
 import numpy as np
@@ -273,7 +274,7 @@ class Election:
 
         duels = np.zeros([self.nb_candidate, self.nb_candidate])
 
-        for row in self.ballot:
+        for row in tqdm(self.ballot):
             for c1, v1 in enumerate(row[:-1]):
                 v1 = (v1,) if not isinstance(v1, Iterable) else v1
                 for v2 in row[c1 + 1 :]:

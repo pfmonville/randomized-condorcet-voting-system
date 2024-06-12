@@ -5,3 +5,4 @@ toolz
 pandas
 scipy
 Jinja2
+tqdm
