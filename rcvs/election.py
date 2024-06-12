@@ -8,12 +8,13 @@ from typing import Any
 import string
 from collections import Counter
 
+import toolz as itz
 import matplotlib.pyplot as plt
 import numpy as np
 from numpy.typing import NDArray
 import pandas as pd
 
-from IPython.display import display, clear_output
+from IPython.display import clear_output
 
 from scipy.optimize import linprog
 from bs4 import BeautifulSoup
@@ -46,6 +47,7 @@ class Election:
         self,
         nb_candidate: int,
         nb_voter: int,
+        ballot: Ballot,
         candidates: list[str] | None = None,
         proba_ranked: list[float] | None = None,
         popularity: list[float] | None = None,
@@ -58,7 +60,7 @@ class Election:
             self.candidates = candidates
         self.proba_ranked = proba_ranked
         self.popularity = popularity
-        self.ballot = None
+        self.ballot = ballot
         self.df_ballot = None
         self.duels = None
         self.df_duels = None
@@ -156,14 +158,17 @@ class Election:
 
         if len(ballot) == 0:
             raise AttributeError(f"The ballot is empty : {ballot}")
+        ballot = [x for x in ballot if isinstance(x, (int, str)) or len(x) > 0]
         flat_ballot = mixed_flatten(it.chain.from_iterable(ballot))
         if len(set(type(c) for c in flat_ballot)) >= 2:
             raise AttributeError("Ballot cannot be a mixed of types, only int or only str")
+        if nb_candidate is not None and (x := len(set(flat_ballot))) > nb_candidate:
+            raise ValueError(f"nb_candidate is too low regarding the ballots given, it must be at least {x}")
         if all(isinstance(c, str) for c in flat_ballot):
             candidates = list(set(flat_ballot))
             nb_candidate = len(candidates)
             ballot = [
-                [candidates.index(c) + 1 if isinstance(c, str) else [candidates.index(d) + 1 for d in c] for c in b]
+                [(candidates.index(c) + 1 if isinstance(c, str) else [candidates.index(d) + 1 for d in c]) for c in b]
                 for b in ballot
             ]
         else:
@@ -185,6 +190,7 @@ class Election:
             proba_ranked=proba_ranked,
             popularity=popularity,
             nb_voter=nb_voter,
+            ballot=ballot,
         )
 
         elect.ballot = ballot
@@ -192,7 +198,7 @@ class Election:
         elect.build_table_duels()
         elect.check_table_duels()
         elect.build_table_payoff()
-        elect.get_best_lottery()
+        elect.get_best_lottery2()
 
         return elect
 
@@ -388,10 +394,7 @@ class Election:
 
         # define the maximum value between each opponent strategy
         # v ⩾ ∑_j(A[i,j]*p[j]) ∀i
-        A_ub = np.c_[
-            -np.ones((self.nb_candidate)),
-            self.payoffs,
-        ]
+        A_ub = np.c_[-np.ones((self.nb_candidate)), self.payoffs]
         b_ub = np.zeros((len(A_ub)))
 
         # défine that the sum of all probabilities for plays is 1
@@ -416,16 +419,10 @@ class Election:
 
             # define the maximum value between each opponent strategy
             # v ⩾ ∑_j(A[i,j]*p[j]) ∀i
-            cons1 = np.c_[
-                np.zeros((self.nb_candidate)),
-                self.payoffs,
-            ]
+            cons1 = np.c_[np.zeros((self.nb_candidate)), self.payoffs]
             # défine z as the maximum between all probabilities of each play
             # z ⩾ p[j] ∀j
-            cons2 = np.c_[
-                -np.ones((self.nb_candidate)),
-                np.eye((self.nb_candidate)),
-            ]
+            cons2 = np.c_[-np.ones((self.nb_candidate)), np.eye((self.nb_candidate))]
             A_ub2 = np.r_[cons1, cons2]
             b_ub2 = np.r_[np.zeros((len(cons1))), np.zeros((len(cons2))) + v]
 
@@ -536,9 +533,11 @@ class Election:
             AttributeError: Description
         """
         if self.payoffs is None:
-            raise AttributeError("duels is None")
+            raise AttributeError("payoffs is None")
         if self.best_lottery is None:
             raise AttributeError("best_lottery is None")
+        if self.duels is None:
+            raise AttributeError("duels is None")
 
         nodes = []
         for c in self.candidates:
@@ -548,8 +547,7 @@ class Election:
             d["proba"] = self.frac(p) if p > 0 else None
             nodes.append(d)
 
-        if self.duels is not None:
-            duels2 = self.duels / self.nb_voter
+        duels2 = self.duels / self.nb_voter
 
         links = []
         for i in range(self.nb_candidate):
@@ -603,9 +601,7 @@ class Election:
         """
         # get template
         env = jj.Environment(
-            loader=jj.FileSystemLoader(["./graph"]),
-            variable_start_string="__$",
-            variable_end_string="$__",
+            loader=jj.FileSystemLoader(["./graph"]), variable_start_string="__$", variable_end_string="$__"
         )
         html_template = env.get_template("graph_template.html")
 
@@ -682,6 +678,76 @@ class Election:
         clear_output(wait=True)
         return HTML(self.graph_html)
 
+    @classmethod
+    def pick_multiple_winners_from_ballot(
+        cls,
+        ballot: Ballot,
+        nb_winners: int,
+        nb_candidate: int | None = None,
+        complete_votes: bool = True,
+    ) -> tuple[list[str], list[str]]:
+        """pick nb_winners iteratively after running election one after another
+
+        Args:
+            ballot (Ballot): the initial ballot
+            nb_winners (int): number of winners wanted
+            nb_candidate (int | None, optional): can be specified if the ballot is only the indices of the candidates and all indices are not present
+
+        Returns:
+            tuple[list[str], list[str]]: list of winners and list of discarded hopefull candidates
+        """
+        elect = Election.run_election_from_ballot(ballot, nb_candidate=nb_candidate, complete_votes=complete_votes)
+        if (nb_candidate is not None and nb_winners > nb_candidate) or nb_winners > elect.nb_candidate:
+            raise ValueError("too many winners asked")
+        hopefull = itz.valfilter(lambda x: x > 0, elect.best_lottery)
+        final_winners = list(hopefull.keys())
+        discarded_hopefull = []
+        i = 1
+        if len(hopefull) > (k := nb_winners):
+            final_winners = list(
+                np.random.choice(list(hopefull.keys()), size=k, replace=False, p=list(hopefull.values()))
+            )
+            discarded_hopefull.extend(
+                [f"{x}*{hopefull[x]:.2f}|1" for x in list(hopefull.keys()) if x not in final_winners]
+            )
+        winners = final_winners
+        winners_display = [
+            f"{x}{f"*{hopefull[x]:.2f}" if len(hopefull) > (nb_winners - len(winners)) else ""}|{i}"
+            for x in final_winners
+        ]
+        while len(winners) < nb_winners:
+            i += 1
+            ballot = [
+                [
+                    (
+                        [can for y in x if (can := elect.candidates[y - 1]) not in winners]
+                        if isinstance(x, list)
+                        else elect.candidates[x - 1]
+                    )
+                    for x in z
+                    if (isinstance(x, list) and len(x) > 0)
+                    or ((not isinstance(x, list)) and elect.candidates[x - 1] not in winners)
+                ]
+                for z in elect.ballot
+            ]
+            elect = Election.run_election_from_ballot(ballot, complete_votes=complete_votes)
+            hopefull = itz.valfilter(lambda x: x > 0, elect.best_lottery)
+            final_winners = list(hopefull.keys())
+            if len(hopefull) > (k := nb_winners - len(winners)):
+                final_winners = np.random.choice(
+                    list(hopefull.keys()), size=k, replace=False, p=list(hopefull.values())
+                )
+                discarded_hopefull.extend(
+                    [f"{x}*{hopefull[x]:.2f}|{i}" for x in list(hopefull.keys()) if x not in final_winners]
+                )
+            winners_display.extend(
+                [
+                    f"{x}{f"*{hopefull[x]:.2f}" if len(hopefull) > (nb_winners - len(winners)) else ""}|{i}"
+                    for x in final_winners
+                ]
+            )
+            winners.extend(final_winners)
+        return winners_display, discarded_hopefull
 
 
 if __name__ == "__main__":
@@ -693,6 +759,10 @@ if __name__ == "__main__":
         ],
         dtype=object,
     )
-    elect = Election.run_election_from_ballot(ballot, nb_candidate=8)
+    elect = Election.run_election_from_ballot(ballot)
     print(elect.best_lottery)
-    elect.build_graph_html()
+    elect.build_graph_data()
+    elect.build_graph_html(saved=True)
+
+    winners, discarded = Election.pick_multiple_winners_from_ballot(ballot, nb_winners=6)
+    print(winners, discarded)

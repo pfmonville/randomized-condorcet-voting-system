@@ -1,0 +1,7 @@
+beautifulsoup4
+ipython
+matplotlib
+toolz
+pandas
+scipy
+Jinja2
