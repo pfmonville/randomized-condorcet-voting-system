@@ -1,0 +1,14 @@
+/build
+*egg-info
+
+.DS_Store
+.python-version
+/wheels
+__pycache__
+*.sublime-workspace
+*.sublime-project
+
+pyrightconfig.json
+.coverage*
+
+/dist

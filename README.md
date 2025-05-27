@@ -6,7 +6,7 @@ Presented in this video (in French) from his you tube channel [Science4All](http
 
 [![Video](./img/condorcet-winner.jpg)](https://www.youtube.com/watch?v=wKimU8jy2a8)
 
-Read [this notebook](http://nbviewer.jupyter.org/github/oscar6echo/randomized-condorcet-voting-system/blob/master/Randomized-Condorcet-Voting-System.ipynb) for:  
+Read [this notebook](Randomized-Condorcet-Voting-System.ipynb) for:  
 + Description of the RCVS
 + Definition of a lottery
 + Method to determine the best lottery
